@@ -11,6 +11,8 @@ A journal of the real reasoning behind this build: decisions, options rejected, 
 - [Entry 7 — Hand the phone a blob and a link it can tap](#entry-7--hand-the-phone-a-blob-and-a-link-it-can-tap)
 - [Entry 8 — One render pipeline for the reader and the editor](#entry-8--one-render-pipeline-for-the-reader-and-the-editor)
 - [Entry 9 — Let oversized rows continue across pages](#entry-9--let-oversized-rows-continue-across-pages)
+- [Entry 10 — One add-on across four Google apps](#entry-10--one-add-on-across-four-google-apps)
+- [Entry 11 — Keep the preview handoff private and inert](#entry-11--keep-the-preview-handoff-private-and-inert)
 
 ## Entry 1 — Keep paper stock and lighting separate
 **Files touched:** `css/style.css`, `js/app.js`, `index.html`
@@ -275,3 +277,61 @@ Give `.reader` and `.reader-shell` `min-width: 0`, give the shell and article ex
 The new browser probe reproduced the original fatal error before the fix. Afterward, its oversized row produces eight contiguous pages and four contiguous image tiles, and both PDF and ZIP downloads arrive (approximately 2.7 MB and 3.8 MB). The 12 layout combinations (320, 375, 430, 768px with paper, ruled, graph) have no overflowing prose rectangles; the phone editor preview also fits. A final rerun checks the table-word correction and existing overflow suite. Actual device behavior has not been tested.
 
 The final rerun passes both the new probe and the existing `overflow` stage, including wide tables that scroll locally and code blocks that stay within the article. The existing `download` stage passes for short and long documents on phone and desktop sizes, including Markdown, PNG/ZIP, and PDF. Visual inspection confirms table words stay intact. One concurrent overflow run timed out during app startup; rerunning that stage alone passed. `node --check` passes for the exporter and new probe.
+
+## Entry 10 — One add-on across four Google apps
+**Files touched:** `workspace-addon/`
+
+### Context
+The user chose Docs, Sheets, Slides, and Gmail, with both native creation/insertion and styled preview/export. Google's Workspace add-on framework uses cards, so the HTML reader cannot be embedded directly. Editor cursor context is also unavailable.
+
+### Before you read on
+How can one product retain its paper rendering while producing editable content in four hosts with different document models?
+
+### Options considered
+- **Separate Editor add-ons with HTML sidebars** — considered, but this does not provide the requested unified Gmail integration.
+- **Chosen: a Workspace card interface plus a browser preview** — keeps one installable project and reuses the existing static reader for visual output.
+
+### Why
+The native adapters should translate a common Markdown model into each host's actual content objects. The visual path should reuse the existing renderer instead of maintaining a second paper/export system. Native insertion needs an explicit destination because the Workspace event does not supply an editor cursor: append in Docs/Slides, add a worksheet in Sheets, and use Gmail's compose action for its supported insertion context.
+
+### How to build it
+1. Keep the new variant under `workspace-addon/`. Build a standalone Apps Script directory from source and the existing Marked parser with `node workspace-addon/build.cjs`.
+2. Convert Marked tokens into paragraphs, styled text runs, and table rows. Maintain JavaScript UTF-16 offsets because Google Docs and Slides use text indices with that unit.
+3. Read the host and file ID from the Workspace event, and request `drive.file` permission before editing. Do not call active-document helpers, which are unavailable in this add-on type.
+4. Build native requests per host. Fetch Docs' first document tab and its ending index before appending. Make a fresh worksheet instead of guessing an active range. Use the presentation's page size for Slides. Return Gmail compose responses without sending mail.
+5. Link to the configured HTTPS reader using its existing `#md=` fragment handoff. Bound the URL length and show an actionable error rather than silently clipping source.
+6. Verify model and request builders with Node's test runner, then install an Apps Script test deployment for live host checks. Local tests cannot establish OAuth or real host behavior.
+
+### What went wrong
+The first platform check ruled out reusing the HTML interface inside the add-on sidebar. No code for that unsupported route was built. Implementation and verification are in progress; live Google account checks still require a test deployment.
+
+### Local verification
+All 16 Node tests pass: native request construction, Unicode offsets, revision guards, file permission gates, worksheet naming, new-file creation, Gmail response types, preview handoff, byte limits, and error redaction. These are simulated Google responses, not live host integration tests. The bundle builds successfully. Setup and a live-account checklist are in `workspace-addon/README.md`.
+
+## Entry 11 — Keep the preview handoff private and inert
+**Files touched:** `index.html`, `js/app.js`, `js/sanitize.js`, `output/playwright/workspace-check.cjs`
+
+### Context
+The existing `#md=` share path can carry Workspace content to the styled reader. The site also loads analytics, and its original HTML cleanup removed script tags only after putting HTML into the live page. A URL fragment avoids server query logs but remains readable to browser scripts.
+
+### Before you read on
+At what point must the fragment be consumed, and where should HTML be parsed so event handlers cannot run before cleanup?
+
+### Options considered
+- **Use the existing share URL unchanged** — rejected after inspecting analytics startup and the narrow post-render cleanup.
+- **Chosen: an explicit Workspace visit flag and an inert template sanitizer** — retain the reader while consuming the source before external scripts and sanitizing before rendering.
+
+### Why
+Skipping analytics for the visit prevents the Workspace handoff from entering analytics events. Sanitizing inside a detached template prevents raw HTML from gaining live event handlers before filtering. The sanitizer uses an allowlist of Markdown elements and attributes and validates URL protocols; code fence language classes remain intact so charts still render.
+
+### How to build it
+1. Generate `#workspace=1&md=<encoded source>` in the add-on. In an early head script, read the source into temporary memory, mark the visit, and clear the URL using `history.replaceState`.
+2. Guard analytics startup with the visit flag. At initial render, consume and delete the temporary source, then use the same reader pipeline as ordinary documents.
+3. Create a template, assign the parser output there, and remove executable elements, event attributes, unknown attributes, and unsafe URLs. Only then serialize the sanitized template into the reader or editor preview. Keep raster data-image URLs for embedded pictures and `language-*` classes for fenced code.
+4. With a local server on port 8099, run the Playwright CLI `run-code` command using the function in `output/playwright/workspace-check.cjs`. It checks an obfuscated JavaScript link, image error handler, SVG load handler, iframe, Unicode, formatting, tables, Chart.js, Mermaid, and PDF/PNG downloads. The malicious broken image is removed after the security assertion so it does not intentionally block export.
+5. The clean Edge run passed without page exceptions. The generated PDF is 143,193 bytes and PNG is 219,143 bytes. The screenshot was visually inspected: table, chart, and diagram are present. The expected invalid-image request returns a console network error; that is distinct from a page exception.
+
+### What went wrong
+The first browser check navigated between fragments on the same page, so startup did not rerun; navigating through `about:blank` fixed the test. The chart check initially looked for a live canvas, but this renderer converts charts into image figures and destroys the canvas. Download checks also needed the actual button names. A stale download promise from a failed test interrupted a later call; restarting the browser session produced a clean full run. A simulated Docs response in the Node harness incorrectly unwrapped the document body, which was corrected before all 16 tests passed.
+
+The existing reader regression stage also passed after sanitization: contents and heading anchors, all twelve papers, all six font stacks, ink toggles, reader/editor chart rendering, clipboard paste, dragged text, and no page exceptions. Final build and all 16 add-on tests passed again. Live Google account validation remains outstanding.

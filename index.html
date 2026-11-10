@@ -5,6 +5,16 @@
   <meta name="viewport" content="width=device-width, initial-scale=1.0">
   <meta name="description" content="Beautiful MD: drop a Markdown or plain-text file, or paste your words, and read them beautifully typeset. Runs entirely in your browser.">
   <title>Beautiful MD</title>
+  <script>
+    // Consume Workspace source before analytics or other external scripts load.
+    (function () {
+      var shared = new URLSearchParams(location.hash.slice(1));
+      if (shared.get('workspace') !== '1') return;
+      window.bmdWorkspaceSource = shared.get('md') || '';
+      window.bmdWorkspaceVisit = true;
+      history.replaceState(null, '', location.pathname + location.search);
+    })();
+  </script>
   <link rel="icon" href="data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 64 64'%3E%3Crect width='64' height='64' rx='12' fill='%23a13a22'/%3E%3Ctext x='32' y='45' font-size='38' text-anchor='middle' fill='%23f7f2e7' font-family='Georgia,serif'%3E%E2%9D%A7%3C/text%3E%3C/svg%3E">
   <link rel="preconnect" href="https://fonts.googleapis.com">
   <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
@@ -14,11 +24,13 @@
   <!-- PostHog analytics (free tier). Replace phc_YOUR_PROJECT_API_KEY with the
        "Project API key" from your posthog.com project settings. -->
   <script>
+    if (!window.bmdWorkspaceVisit) {
     !function (t, e) { var o, n, p, r; e.__SV || (window.posthog = e, e._i = [], e.init = function (i, s, a) { function g(t, e) { var o = e.split("."); 2 == o.length && (t = t[o[0]], e = o[1]), t[e] = function () { t.push([e].concat(Array.prototype.slice.call(arguments, 0))) } } (p = t.createElement("script")).type = "text/javascript", p.async = !0, p.src = s.api_host.replace(".i.posthog.com", "-assets.i.posthog.com") + "/static/array.js", (r = t.getElementsByTagName("script")[0]).parentNode.insertBefore(p, r); var u = a; void 0 !== a ? e[u] = e : a = "posthog", e.people = e.people || [], e.toString = function (t) { var e = "posthog"; return "posthog" !== a && (e += "." + a), t || (e += " (stub)"), e }, e.people.toString = function () { return e.toString(1) + ".people (stub)" }; var c = "capture identify alias people.set people.set_once set_config register register_once unregister opt_out_capturing has_opted_out_capturing opt_in_capturing reset".split(" "); for (o = 0; o < c.length; o++) g(e, c[o]); e._i.push([i, s, a]) }, e.__SV = 1) }(document, window.posthog || []);
     posthog.init('phc_xzmBnxfioeSLjbGvFqfWxn54J9FLAmqNj5tx2DcWPshY', {
       api_host: 'https://eu.i.posthog.com',
       person_profiles: 'identified_only'
     });
+    }
   </script>
 </head>
 <body>
@@ -279,6 +291,7 @@
   <script src="js/charts.js"></script>
   <script src="js/export.js"></script>
   <script src="js/editor.js"></script>
+  <script src="js/sanitize.js"></script>
   <script src="js/app.js"></script>
 </body>
 </html>

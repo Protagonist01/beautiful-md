@@ -270,7 +270,7 @@
   function toHTML(source) {
     if (window.marked) {
       try {
-        return marked.parse(source);
+        return window.bmdSanitizeHTML(marked.parse(source));
       } catch (e) {
         return "<pre><code>" + escapeHTML(source) + "</code></pre>";
       }
@@ -973,7 +973,8 @@
     const hash = new URLSearchParams(location.hash.replace(/^#/, ""));
     const paperParam = hash.get("paper");
     if (paperParam) setPaper(paperParam);
-    const mdParam = hash.get("md");
+    const mdParam = window.bmdWorkspaceSource || hash.get("md");
+    delete window.bmdWorkspaceSource;
     if (mdParam && mdParam.trim()) {
       try {
         renderMarkdown(mdParam, "shared.md", "share-link");

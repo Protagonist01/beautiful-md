@@ -7,3 +7,5 @@ output/**/*.zip
 .env
 .env.*
 !.env.example
+workspace-addon/dist/
+.clasp.json
