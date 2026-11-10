@@ -1,0 +1,33 @@
+async (page) => {
+  await page.reload();
+  await page.locator('#newDocBtn').click();
+  await page.locator('#chartExampleBtn').click();
+  await page.evaluate(() => window.bmdCharts.ready());
+  await page.locator('#exportBtn').click();
+  const download = page.waitForEvent('download');
+  await page.locator('#downloadPdfBtn').click();
+  await (await download).saveAs('output/playwright/charts-example.pdf');
+  await page.locator('#settingsBtn').click();
+  await page.locator('.swatch[data-paper="graph"]').click();
+  await page.locator('#settingsClose').click();
+  await page.evaluate(() => window.bmdCharts.ready());
+  await page.locator('#exportBtn').click();
+  const png = page.waitForEvent('download');
+  await page.locator('#downloadImageBtn').click();
+  await (await png).saveAs('output/playwright/graph-example.png');
+  await page.locator('#newDocBtn').click();
+  await page.locator('#clipboardBtn').click();
+  await page.locator('#pasteArea').fill('# More charts\n\n```mermaid\nsequenceDiagram\n  Alice->>Bob: Hello\n  Bob-->>Alice: Hi\n```\n\n```mermaid\npie title Reading\n  "Books" : 60\n  "Articles" : 40\n```\n\n```chartjs\n{"type":"line","data":{"labels":["Jan","Feb"],"datasets":[{"label":"Sales","data":[2,5]}]}}\n```\n\n```chart\n{"type":"pie","data":{"labels":["Books","Articles"],"datasets":[{"data":[60,40]}]}}\n```\n\n![Embedded image](data:image/svg+xml,%3Csvg%20xmlns=%22http://www.w3.org/2000/svg%22%20width=%22400%22%20height=%22100%22%3E%3Crect%20width=%22400%22%20height=%22100%22%20fill=%22teal%22/%3E%3C/svg%3E)');
+  await page.locator('#pasteRender').click();
+  await page.evaluate(() => window.bmdCharts.ready());
+  if (await page.locator('.chart-error').count()) throw new Error(await page.locator('.chart-error').allTextContents());
+  if (await page.locator('.chart-figure').count() !== 4) throw new Error('Missing charts');
+  await page.setViewportSize({width:390,height:844});
+  await page.waitForTimeout(200);
+  await page.evaluate(() => window.bmdCharts.ready());
+  await page.screenshot({path:'output/playwright/gallery-mobile.png',fullPage:true});
+  await page.locator('#exportBtn').click();
+  const gallery = page.waitForEvent('download');
+  await page.locator('#downloadPdfBtn').click();
+  await (await gallery).saveAs('output/playwright/gallery.pdf');
+}

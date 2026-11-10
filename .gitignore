@@ -1,0 +1,9 @@
+.claude/
+.playwright-cli/
+beautiful-md-deploy.zip
+output/**/*.png
+output/**/*.pdf
+output/**/*.zip
+.env
+.env.*
+!.env.example

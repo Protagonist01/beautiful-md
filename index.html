@@ -1,0 +1,284 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <meta name="description" content="Beautiful MD: drop a Markdown or plain-text file, or paste your words, and read them beautifully typeset. Runs entirely in your browser.">
+  <title>Beautiful MD</title>
+  <link rel="icon" href="data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 64 64'%3E%3Crect width='64' height='64' rx='12' fill='%23a13a22'/%3E%3Ctext x='32' y='45' font-size='38' text-anchor='middle' fill='%23f7f2e7' font-family='Georgia,serif'%3E%E2%9D%A7%3C/text%3E%3C/svg%3E">
+  <link rel="preconnect" href="https://fonts.googleapis.com">
+  <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+  <link href="https://fonts.googleapis.com/css2?family=Fraunces:ital,opsz,wght@0,9..144,400..700;1,9..144,400..700&family=Newsreader:ital,opsz,wght@0,6..72,400..700;1,6..72,400..700&family=IBM+Plex+Sans:ital,wght@0,400;0,500;0,600;1,400&family=IBM+Plex+Mono:wght@400;500&display=swap" rel="stylesheet">
+  <link rel="stylesheet" href="css/style.css">
+
+  <!-- PostHog analytics (free tier). Replace phc_YOUR_PROJECT_API_KEY with the
+       "Project API key" from your posthog.com project settings. -->
+  <script>
+    !function (t, e) { var o, n, p, r; e.__SV || (window.posthog = e, e._i = [], e.init = function (i, s, a) { function g(t, e) { var o = e.split("."); 2 == o.length && (t = t[o[0]], e = o[1]), t[e] = function () { t.push([e].concat(Array.prototype.slice.call(arguments, 0))) } } (p = t.createElement("script")).type = "text/javascript", p.async = !0, p.src = s.api_host.replace(".i.posthog.com", "-assets.i.posthog.com") + "/static/array.js", (r = t.getElementsByTagName("script")[0]).parentNode.insertBefore(p, r); var u = a; void 0 !== a ? e[u] = e : a = "posthog", e.people = e.people || [], e.toString = function (t) { var e = "posthog"; return "posthog" !== a && (e += "." + a), t || (e += " (stub)"), e }, e.people.toString = function () { return e.toString(1) + ".people (stub)" }; var c = "capture identify alias people.set people.set_once set_config register register_once unregister opt_out_capturing has_opted_out_capturing opt_in_capturing reset".split(" "); for (o = 0; o < c.length; o++) g(e, c[o]); e._i.push([i, s, a]) }, e.__SV = 1) }(document, window.posthog || []);
+    posthog.init('phc_xzmBnxfioeSLjbGvFqfWxn54J9FLAmqNj5tx2DcWPshY', {
+      api_host: 'https://eu.i.posthog.com',
+      person_profiles: 'identified_only'
+    });
+  </script>
+</head>
+<body>
+
+  <div class="progress" aria-hidden="true"><span id="progressBar"></span></div>
+
+  <header class="masthead">
+    <a href="#" class="brand" id="brandLink" title="Back to start">
+      <span class="brand-fleuron" aria-hidden="true">❧</span>
+      <span class="brand-word">Beautiful</span><span class="brand-md">MD</span>
+    </a>
+    <nav class="masthead-actions">
+      <button id="newDocBtn" class="btn btn-ghost is-hidden" type="button" aria-label="New document" title="New document">
+        <span class="action-label">← New document</span>
+        <svg class="action-icon" width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.7" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true">
+          <path d="M13 3H6a2 2 0 0 0-2 2v14a2 2 0 0 0 2 2h9"/><path d="M13 3v5h5"/><path d="M19 14v7m-3.5-3.5h7"/>
+        </svg>
+      </button>
+      <button id="editBtn" class="btn btn-ghost is-hidden" type="button" aria-label="Edit document" title="Edit document">
+        <span class="action-label">Edit</span>
+        <svg class="action-icon" width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.7" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true">
+          <path d="M4 20h4L19 9a2.1 2.1 0 0 0-3-3L5 17v3Z"/><path d="M14.5 7.5l2 2"/>
+        </svg>
+      </button>
+      <button id="exportBtn" class="btn btn-ghost is-hidden" type="button" aria-label="Download" title="Download" aria-haspopup="dialog">
+        <span class="action-label">Download</span>
+        <svg class="action-icon" width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.7" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true">
+          <path d="M12 3v12m0 0-4-4m4 4 4-4"/><path d="M4 17v3h16v-3"/>
+        </svg>
+      </button>
+      <button id="settingsBtn" class="btn btn-icon" type="button" aria-label="Typesetting preferences" aria-expanded="false" title="Typesetting preferences">
+        <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.6" stroke-linecap="round">
+          <path d="M4 7h9M19.5 7H20M4 17h3M11.5 17H20"/><circle cx="15.5" cy="7" r="2.3"/><circle cx="9" cy="17" r="2.3"/>
+        </svg>
+      </button>
+      <button id="themeToggle" class="btn btn-icon" type="button" aria-label="Toggle night ink" title="Toggle night ink">
+        <svg class="icon-sun" width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.6" stroke-linecap="round">
+          <circle cx="12" cy="12" r="4.4"/><path d="M12 2.5v2.4M12 19.1v2.4M2.5 12h2.4M19.1 12h2.4M4.9 4.9l1.7 1.7M17.4 17.4l1.7 1.7M19.1 4.9l-1.7 1.7M6.6 17.4l-1.7 1.7"/>
+        </svg>
+        <svg class="icon-moon" width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.6" stroke-linecap="round" stroke-linejoin="round">
+          <path d="M20.2 14.2A8.3 8.3 0 0 1 9.8 3.8a8.3 8.3 0 1 0 10.4 10.4Z"/>
+        </svg>
+      </button>
+    </nav>
+  </header>
+
+  <main>
+    <!-- ============ Landing ============ -->
+    <section id="landing" class="landing">
+      <h1 class="hero reveal" style="--d:1">Markdown, <em>set&nbsp;beautifully</em>.</h1>
+      <p class="hero-sub reveal" style="--d:2">Drop a Markdown or plain-text file, or paste your words. Read them beautifully typeset on your choice of paper.</p>
+
+      <div id="dropzone" class="dropzone reveal" style="--d:3">
+        <span class="tick tick-tl" aria-hidden="true"></span>
+        <span class="tick tick-tr" aria-hidden="true"></span>
+        <span class="tick tick-bl" aria-hidden="true"></span>
+        <span class="tick tick-br" aria-hidden="true"></span>
+        <div id="fileDropTarget" class="dropzone-main" role="button" tabindex="0" aria-label="Choose a Markdown or plain-text file">
+          <svg class="dropzone-glyph" width="34" height="34" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.3" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true">
+            <path d="M12 16V4m0 0-4 4m4-4 4 4"/><path d="M4 15v3.5A1.5 1.5 0 0 0 5.5 20h13a1.5 1.5 0 0 0 1.5-1.5V15"/>
+          </svg>
+          <p class="dropzone-title">Drop a <code>.md</code> or <code>.txt</code> file</p>
+          <p class="dropzone-sub">or drag in selected text from anywhere</p>
+        </div>
+        <div class="dropzone-alt">
+          <button id="browseBtn" class="linklike" type="button">browse your files</button>
+          <span class="dz-dot" aria-hidden="true">✳</span>
+          <button id="clipboardBtn" class="linklike" type="button">write or paste markdown</button>
+        </div>
+        <input type="file" id="fileInput" accept=".md,.markdown,.mdown,.mkd,.txt" hidden>
+      </div>
+      <button id="chartExampleBtn" class="linklike" type="button">Try charts &amp; diagrams</button>
+
+      <div class="marquee reveal" style="--d:4" aria-hidden="true">
+        <div class="marquee-track">
+          <ul class="landing-features">
+            <li>Markdown or plain text</li>
+            <li>GFM tables</li>
+            <li>Syntax highlighting</li>
+            <li>Auto contents</li>
+            <li>Night ink</li>
+            <li>Nothing to install</li>
+          </ul>
+          <ul class="landing-features" aria-hidden="true">
+            <li>Markdown or plain text</li>
+            <li>GFM tables</li>
+            <li>Syntax highlighting</li>
+            <li>Auto contents</li>
+            <li>Night ink</li>
+            <li>Nothing to install</li>
+          </ul>
+        </div>
+      </div>
+    </section>
+
+    <!-- ============ Reader ============ -->
+    <section id="reader" class="reader is-hidden">
+      <div class="reader-shell">
+        <aside class="toc" id="tocAside" aria-label="Table of contents">
+          <button class="toc-title" id="tocTitle" type="button" aria-expanded="false" aria-controls="tocNav">Contents</button>
+          <nav id="tocNav" class="toc-nav"></nav>
+        </aside>
+        <article id="article" class="article" aria-live="polite"></article>
+      </div>
+    </section>
+  </main>
+
+  <footer class="colophon">
+    <span class="colophon-mark" aria-hidden="true">❦</span>
+    <span>Set with care. Everything happens in your browser</span>
+    <span class="colophon-credit">With <svg class="credit-heart" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.7" stroke-linecap="round" stroke-linejoin="round" role="img" aria-label="love"><path d="M20.4 5.9a4.7 4.7 0 0 0-6.6 0L12 7.7l-1.8-1.8a4.7 4.7 0 0 0-6.6 6.6L12 20.9l8.4-8.4a4.7 4.7 0 0 0 0-6.6Z"/><path d="M7 8.7c-.6.6-.8 1.2-.8 1.9"/></svg> from <a href="https://henryfadeni.vercel.app" target="_blank" rel="noopener noreferrer">Henry</a></span>
+  </footer>
+
+  <dialog id="exportDialog" class="export-dialog" aria-labelledby="exportTitle">
+    <div class="dialog-head">
+      <p id="exportTitle" class="eyebrow">Download document</p>
+      <button id="exportClose" class="btn btn-icon" type="button" aria-label="Close download options">×</button>
+    </div>
+    <p class="export-description">Save the rendered page with its current paper and ink. Long image exports download as numbered PNGs in a ZIP.</p>
+    <div class="export-actions">
+      <button id="downloadPdfBtn" class="btn btn-solid" type="button">Download PDF</button>
+      <button id="downloadImageBtn" class="btn btn-ghost" type="button">Download PNG image</button>
+      <button id="downloadMdBtn" class="btn btn-ghost" type="button">Download Markdown</button>
+    </div>
+    <!-- Mobile browsers often refuse a download triggered after an await, so the
+         finished file is also offered as a link the reader can tap. -->
+    <p id="exportStatus" class="export-status" role="status" aria-live="polite" hidden></p>
+    <a id="exportSaveLink" class="btn btn-solid export-save" hidden download>Save the file</a>
+  </dialog>
+
+  <!-- ============ Editor ============ -->
+  <section id="editor" class="editor is-hidden" aria-label="Markdown editor">
+    <header class="editor-bar">
+      <p class="eyebrow editor-eyebrow">Editor</p>
+      <div class="editor-tabs" role="tablist" aria-label="Editor view">
+        <button id="editorTabWrite" class="editor-tab is-active" type="button" role="tab" aria-selected="true" aria-controls="editorWrite">Write</button>
+        <button id="editorTabPreview" class="editor-tab" type="button" role="tab" aria-selected="false" aria-controls="editorPreviewPane">Preview</button>
+      </div>
+      <div class="editor-bar-actions">
+        <button id="editorCancel" class="btn btn-ghost" type="button">Cancel</button>
+        <button id="editorDone" class="btn btn-solid" type="button">Done</button>
+      </div>
+    </header>
+
+    <div class="editor-panes">
+      <div id="editorWrite" class="editor-write" role="tabpanel" aria-labelledby="editorTabWrite">
+        <textarea id="editorArea" class="editor-area" spellcheck="true" autocapitalize="sentences"
+          placeholder="# Hello, beautiful&#10;&#10;Write or paste markdown here…"></textarea>
+      </div>
+      <div id="editorPreviewPane" class="editor-preview" role="tabpanel" aria-labelledby="editorTabPreview">
+        <div id="editorPreview" class="article"></div>
+      </div>
+    </div>
+
+    <!-- Sits below the panes so a phone keyboard pushes it into reach -->
+    <div class="editor-tools" role="toolbar" aria-label="Markdown formatting">
+      <button class="editor-tool" type="button" data-md="heading" title="Heading" aria-label="Heading"><span class="tool-glyph">H</span></button>
+      <button class="editor-tool" type="button" data-md="bold" title="Bold (Ctrl+B)" aria-label="Bold"><span class="tool-glyph tool-bold">B</span></button>
+      <button class="editor-tool" type="button" data-md="italic" title="Italic (Ctrl+I)" aria-label="Italic"><span class="tool-glyph tool-italic">I</span></button>
+      <button class="editor-tool" type="button" data-md="strike" title="Strikethrough" aria-label="Strikethrough"><span class="tool-glyph tool-strike">S</span></button>
+      <span class="editor-tool-sep" aria-hidden="true"></span>
+      <button class="editor-tool" type="button" data-md="link" title="Link (Ctrl+K)" aria-label="Link">
+        <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" aria-hidden="true"><path d="M10 13.5a3.5 3.5 0 0 0 5 0l3-3a3.5 3.5 0 0 0-5-5l-1.2 1.2"/><path d="M14 10.5a3.5 3.5 0 0 0-5 0l-3 3a3.5 3.5 0 0 0 5 5l1.2-1.2"/></svg>
+      </button>
+      <button class="editor-tool" type="button" data-md="quote" title="Quote" aria-label="Quote"><span class="tool-glyph">&rdquo;</span></button>
+      <button class="editor-tool" type="button" data-md="bullet" title="Bulleted list" aria-label="Bulleted list">
+        <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" aria-hidden="true"><path d="M9 6h11M9 12h11M9 18h11"/><circle cx="4.5" cy="6" r="1.3" fill="currentColor" stroke="none"/><circle cx="4.5" cy="12" r="1.3" fill="currentColor" stroke="none"/><circle cx="4.5" cy="18" r="1.3" fill="currentColor" stroke="none"/></svg>
+      </button>
+      <button class="editor-tool" type="button" data-md="number" title="Numbered list" aria-label="Numbered list">
+        <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" aria-hidden="true"><path d="M9 6h11M9 12h11M9 18h11"/><path d="M4 4.5h1V8M3.4 15.2a1.1 1.1 0 1 1 1.9.8L3.4 18.5H5.6" stroke-width="1.4"/></svg>
+      </button>
+      <button class="editor-tool" type="button" data-md="task" title="Task list" aria-label="Task list">
+        <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><rect x="3" y="4" width="7" height="7" rx="1.5"/><path d="M4.8 7.5 6.3 9l3-3.2"/><rect x="3" y="14" width="7" height="7" rx="1.5"/><path d="M13 7.5h8M13 17.5h8"/></svg>
+      </button>
+      <span class="editor-tool-sep" aria-hidden="true"></span>
+      <button class="editor-tool" type="button" data-md="code" title="Inline code" aria-label="Inline code"><span class="tool-glyph tool-code">&lt;/&gt;</span></button>
+      <button class="editor-tool" type="button" data-md="codeblock" title="Code block" aria-label="Code block"><span class="tool-glyph tool-code">```</span></button>
+      <button class="editor-tool" type="button" data-md="table" title="Table" aria-label="Table">
+        <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.7" stroke-linejoin="round" aria-hidden="true"><rect x="3" y="4.5" width="18" height="15" rx="1.5"/><path d="M3 9.5h18M9.5 9.5V19.5M15.5 9.5V19.5"/></svg>
+      </button>
+      <button class="editor-tool" type="button" data-md="rule" title="Horizontal rule" aria-label="Horizontal rule"><span class="tool-glyph">&mdash;</span></button>
+    </div>
+  </section>
+
+  <!-- ============ Typesetting preferences ============ -->
+  <div id="settingsScrim" class="settings-scrim" aria-hidden="true"></div>
+  <aside id="settingsPanel" class="settings" role="dialog" aria-label="Typesetting preferences">
+    <div class="settings-head">
+      <p class="eyebrow">Typesetting</p>
+      <button id="settingsClose" class="btn btn-icon" type="button" aria-label="Close preferences">
+        <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round"><path d="M5 5l14 14M19 5 5 19"/></svg>
+      </button>
+    </div>
+
+    <div class="settings-group">
+      <p class="settings-label">Paper</p>
+      <div class="swatches" id="paperSwatches"></div>
+    </div>
+
+    <div class="settings-group">
+      <label class="settings-label" for="prefTypeface">Typeface</label>
+      <select id="prefTypeface" class="font-select">
+        <option value="serif">Newsreader · Editorial serif</option>
+        <option value="sans">IBM Plex Sans · Modern sans</option>
+        <option value="georgia">Georgia · Classic serif</option>
+        <option value="palatino">Palatino · Book serif</option>
+        <option value="verdana">Verdana · Open sans</option>
+        <option value="mono">IBM Plex Mono · Monospace</option>
+      </select>
+    </div>
+
+    <div class="settings-group">
+      <p class="settings-label">Text size</p>
+      <div class="seg" data-pref="size">
+        <button type="button" value="s">Small</button>
+        <button type="button" value="m">Medium</button>
+        <button type="button" value="l">Large</button>
+      </div>
+    </div>
+
+    <div class="settings-group">
+      <p class="settings-label">Measure</p>
+      <div class="seg" data-pref="measure">
+        <button type="button" value="narrow">Narrow</button>
+        <button type="button" value="medium">Medium</button>
+        <button type="button" value="wide">Wide</button>
+      </div>
+    </div>
+
+    <div class="settings-group">
+      <p class="settings-label">Leading</p>
+      <div class="seg" data-pref="leading">
+        <button type="button" value="compact">Compact</button>
+        <button type="button" value="cozy">Cozy</button>
+        <button type="button" value="airy">Airy</button>
+      </div>
+    </div>
+
+    <div class="settings-group">
+      <p class="settings-label">Reading</p>
+      <label class="switch-row"><span>Drop caps</span><input type="checkbox" id="prefDropcap"><span class="switch-ui"></span></label>
+      <label class="switch-row"><span>Justified text</span><input type="checkbox" id="prefJustify"><span class="switch-ui"></span></label>
+      <label class="switch-row"><span>Show contents</span><input type="checkbox" id="prefToc"><span class="switch-ui"></span></label>
+      <label class="switch-row"><span>Filename &amp; reading stats</span><input type="checkbox" id="prefDochead"><span class="switch-ui"></span></label>
+      <label class="switch-row"><span>Decorative marks</span><input type="checkbox" id="prefOrnaments"><span class="switch-ui"></span></label>
+    </div>
+
+    <button id="resetPrefs" class="btn btn-ghost settings-reset" type="button">Reset to defaults</button>
+  </aside>
+
+  <div id="toast" class="toast" role="status" aria-live="polite"></div>
+
+  <script src="vendor/marked.min.js"></script>
+  <script src="vendor/highlight.min.js"></script>
+  <script src="vendor/html2canvas.min.js"></script>
+  <script src="vendor/jspdf.umd.min.js"></script>
+  <script src="vendor/jszip.min.js"></script>
+  <script src="js/charts.js"></script>
+  <script src="js/export.js"></script>
+  <script src="js/editor.js"></script>
+  <script src="js/app.js"></script>
+</body>
+</html>

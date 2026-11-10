@@ -1,0 +1,37 @@
+async (page) => {
+  await page.reload();
+  await page.setViewportSize({width:1280,height:900});
+  await page.locator('#settingsBtn').click();
+  await page.locator('#resetPrefs').click();
+  await page.locator('.swatch[data-paper="paper"]').click();
+  await page.locator('#settingsClose').click();
+  if (await page.evaluate(() => document.documentElement.dataset.theme === 'dark')) await page.locator('#themeToggle').click();
+  await page.locator('#newDocBtn').click();
+  await page.locator('#chartExampleBtn').click();
+  await page.evaluate(() => window.bmdCharts.ready());
+  if (await page.locator('.chart-figure').count() !== 2) throw new Error('Example missing charts');
+  await page.locator('#exportBtn').click();
+  const png = page.waitForEvent('download');
+  await page.locator('#downloadImageBtn').click();
+  await (await png).saveAs('output/playwright/charts-example.png');
+  await page.locator('#exportBtn').click();
+  const pdf = page.waitForEvent('download');
+  await page.locator('#downloadPdfBtn').click();
+  await (await pdf).saveAs('output/playwright/charts-example.pdf');
+  await page.locator('#newDocBtn').click();
+  await page.locator('#clipboardBtn').click();
+  await page.locator('#pasteArea').fill('# Errors\n\n```chart\n{"type":\n```\n\n```mermaid\nflowchart LR\nA --> [\n```\n\nThe rest of this document remains readable.');
+  await page.locator('#pasteRender').click();
+  await page.evaluate(() => window.bmdCharts.ready());
+  if (await page.locator('.chart-error').count() !== 2) throw new Error('Missing chart error feedback');
+  if (await page.locator('.code-block:visible').count() !== 2) throw new Error('Invalid chart source hidden');
+  await page.locator('#newDocBtn').click();
+  await page.locator('#clipboardBtn').click();
+  await page.locator('#pasteArea').fill('# Missing image\n\n![Missing cover](http://localhost:8765/missing-image.png)');
+  await page.locator('#pasteRender').click();
+  await page.locator('#exportBtn').click();
+  await page.locator('#downloadImageBtn').click();
+  await page.waitForFunction(() => document.querySelector('#toast').textContent.includes('Image could not load'));
+  if (await page.locator('#downloadImageBtn').isDisabled()) throw new Error('Failed export left controls disabled');
+  if (await page.locator('.export-surface').count()) throw new Error('Failed export left clone in DOM');
+}
