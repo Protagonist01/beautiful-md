@@ -40,11 +40,44 @@ var BmdGoogle = (function () {
   function writeDoc(id, blocks) {
     var doc = api(endpoints.docs + '/' + encodeURIComponent(id) + '?includeTabsContent=true');
     var target = docTarget(doc);
-    var requests = BmdMarkdown.docs(blocks, target.index, target.tabId);
+    var style = doc.documentStyle || {};
+    var imageWidth = Math.max(36, Math.min(420, (style.pageSize && style.pageSize.width && style.pageSize.width.magnitude || 612) - (style.marginLeft && style.marginLeft.magnitude || 72) - (style.marginRight && style.marginRight.magnitude || 72)));
+    var hasTables = blocks.some(function (block) { return block.type === 'table'; });
+    var requests = hasTables ? blocks.slice().reverse().flatMap(function (block) {
+      if (block.type === 'table') return [{ insertTable: { rows: block.rows.length, columns: block.rows[0].length,
+        location: Object.assign({ index: target.index }, target.tabId ? { tabId: target.tabId } : {}) } }];
+      return BmdMarkdown.docs([block], target.index, target.tabId, true, imageWidth);
+    }) : BmdMarkdown.docs(blocks, target.index, target.tabId, true, imageWidth);
     // Keep computed append indices valid if another editor changes the file.
     var body = { requests: requests };
     if (doc.revisionId) body.writeControl = { requiredRevisionId: doc.revisionId };
     api(endpoints.docs + '/' + encodeURIComponent(id) + ':batchUpdate', 'post', body);
+    if (hasTables) {
+      // Read the table cell indices created by Google; never guess their offsets.
+      var updated = api(endpoints.docs + '/' + encodeURIComponent(id) + '?includeTabsContent=true');
+      var first = updated.tabs && updated.tabs[0];
+      var content = first && first.documentTab ? first.documentTab.body.content : updated.body && updated.body.content;
+      var tables = (content || []).filter(function (element) { return element.table && element.startIndex >= target.index; });
+      var sources = blocks.filter(function (block) { return block.type === 'table'; });
+      if (tables.length !== sources.length) throw new Error('Table structure changed. Review the saved document before another operation.');
+      var cells = [];
+      tables.forEach(function (element, ti) {
+        element.table.tableRows.forEach(function (row, ri) { row.tableCells.forEach(function (cell, ci) {
+          var paragraph = cell.content.find(function (part) { return part.paragraph; });
+          if (!paragraph || !Number.isInteger(paragraph.startIndex)) throw new Error('Google did not return a writable table cell.');
+          var runs = sources[ti].rows[ri][ci].map(function (run) { return Object.assign({}, run, { style: Object.assign({}, run.style, ri === 0 ? { bold: true } : {}) }); });
+          cells.push({ index: paragraph.startIndex, runs: runs, width: Math.max(24, imageWidth / row.tableCells.length - 12), alignment: { left: 'START', right: 'END', center: 'CENTER' }[(sources[ti].align || [])[ci]] || 'START' });
+        }); });
+      });
+      var fill = { requests: cells.sort(function (a, b) { return b.index - a.index; }).flatMap(function (cell) {
+        return BmdMarkdown.docs([{ type: 'paragraph', runs: cell.runs }], cell.index, target.tabId, false, cell.width).map(function (request) {
+          if (request.updateParagraphStyle) request.updateParagraphStyle.paragraphStyle.alignment = cell.alignment;
+          return request;
+        });
+      }) };
+      if (updated.revisionId) fill.writeControl = { requiredRevisionId: updated.revisionId };
+      api(endpoints.docs + '/' + encodeURIComponent(id) + ':batchUpdate', 'post', fill);
+    }
     return 'https://docs.google.com/document/d/' + encodeURIComponent(id) + '/edit';
   }
   function writeSheet(id, blocks, title, existing) {
@@ -94,6 +127,7 @@ var BmdGoogle = (function () {
   function convert(host, title, blocks, event, insert) {
     if (!endpoints[host]) throw new Error('Open this action in Docs, Sheets, or Slides.');
     BmdMarkdown.validateNative(blocks);
+    if (blocks.some(function (block) { return block.type === 'table' && (block.rows.length > 200 || block.rows[0].length > 20 || block.rows.length * block.rows[0].length > 1000); })) throw new Error('Native tables are limited to 200 rows, 20 columns, and 1,000 cells. Split large tables first.');
     // Catch deterministic content failures before creating an empty file.
     if (host === 'slides' && !insert) BmdMarkdown.slides(blocks, 720, 405, 'preflight');
     if (host === 'sheets') {

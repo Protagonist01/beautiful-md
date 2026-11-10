@@ -9,3 +9,6 @@ output/**/*.zip
 !.env.example
 workspace-addon/dist/
 .clasp.json
+node_modules/
+output/browser-matrix.json
+output/pdf/*.html

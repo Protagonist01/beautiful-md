@@ -55,6 +55,7 @@
     clearTimeout(changeTimer);
     editor.classList.add("is-hidden");
     document.body.classList.remove("locked");
+    window.bmdImages?.release(preview);
     preview.innerHTML = "";
   }
 

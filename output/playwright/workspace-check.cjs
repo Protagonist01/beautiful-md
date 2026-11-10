@@ -15,6 +15,7 @@ async (page) => {
   await page.goto('http://127.0.0.1:8099/index.html#workspace=1&md=' + encodeURIComponent(source));
   await page.locator('#article h1').waitFor();
   await page.evaluate(() => window.bmdCharts.ready());
+  await page.evaluate(() => window.bmdImages.ready(document.querySelector('#article')));
   const state = await page.evaluate(() => ({
     hash: location.hash,
     analytics: Boolean(window.posthog),
@@ -30,7 +31,7 @@ async (page) => {
   if (state.bold !== 'bold' || state.cells !== 2 || !state.charts || !state.diagrams) throw new Error('Formatting or charts failed: ' + JSON.stringify(state));
   // The broken test image is useful for injection checks, but must be removed
   // before testing successful export (the exporter correctly rejects it).
-  await page.locator('#article img[src="invalid"]').evaluateAll(images => images.forEach(image => image.remove()));
+  await page.locator('#article img[data-bmd-image-error], #article .image-error').evaluateAll(images => images.forEach(image => image.remove()));
   await page.getByRole('button', { name: 'Download', exact: true }).click();
   for (const [label, name] of [['Download PDF', 'workspace-preview.pdf'], ['Download PNG image', 'workspace-export.png']]) {
     await page.getByRole('button', { name: label, exact: true }).click();

@@ -15,10 +15,13 @@ window.bmdTypography = {
     });
   },
   fontWarnings(container) {
-    const family = getComputedStyle(container).fontFamily.split(',')[0].trim().replace(/["']/g, '');
-    const faces = Array.from(document.fonts).filter(face => face.family.replace(/["']/g, '') === family);
+    const elements = [container, ...container.querySelectorAll('h1,h2,h3,h4,h5,h6,code,pre,td,th,figcaption')];
+    const required = new Set(elements.filter(el => el.textContent.trim()).map(el => getComputedStyle(el).fontFamily.split(',')[0].trim().replace(/["']/g, '')));
     const webFonts = ['Newsreader', 'Fraunces', 'IBM Plex Sans', 'IBM Plex Mono'];
-    return faces.some(face => face.status === 'error') || (webFonts.includes(family) && !faces.length)
-      ? ['The selected web font is unavailable. A fallback font is being used; line and page breaks may differ.'] : [];
+    const missing = Array.from(required).filter(family => {
+      const faces = Array.from(document.fonts).filter(face => face.family.replace(/["']/g, '') === family);
+      return faces.some(face => face.status === 'error') || (webFonts.includes(family) && !faces.length);
+    });
+    return missing.length ? ['A selected web font is unavailable (' + missing.join(', ') + '). A fallback font is being used; line and page breaks may differ.'] : [];
   }
 };

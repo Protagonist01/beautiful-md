@@ -36,7 +36,11 @@ window.bmdSanitizeHTML = function (html) {
         }
         if ((name === 'href' && tag === 'a') || (name === 'src' && tag === 'img')) {
           const safe = safeUrl(value, tag === 'img');
-          if (safe !== null) { el.setAttribute(name, safe); return; }
+          if (safe !== null) {
+            if (tag === 'img') { el.setAttribute('data-bmd-src', safe); el.removeAttribute('src'); }
+            else el.setAttribute(name, safe);
+            return;
+          }
         }
         if (['colspan', 'rowspan', 'start'].includes(name) && /^\d{1,3}$/.test(value)) return;
         if (tag === 'input' && name === 'checked') return;

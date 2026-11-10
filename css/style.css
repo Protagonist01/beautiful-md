@@ -1670,6 +1670,8 @@ body.locked { overflow: hidden; }
 .article.export-surface .chart-figure { padding: 20px; }
 .chart-figure { margin-inline: 0; }
 .render-notice { padding: 12px 16px; margin-bottom: 24px; font: 0.85rem/1.5 var(--sans-body); color: var(--ink); border-inline-start: 3px solid var(--accent); background: var(--paper-raised); }
+.image-error { display: block; padding: 12px; font: 0.85rem/1.5 var(--sans-body); color: var(--accent); }
+html.local-fonts { --serif-body: Georgia, serif; --serif-display: Georgia, serif; --sans-body: Arial, sans-serif; --mono: Consolas, "Courier New", monospace; }
 #exportPreview { margin: 20px 0 0; }
 #exportPreview img { display: block; width: 100%; max-height: 320px; object-fit: contain; }
 #exportPreview figcaption { margin-top: 8px; font: 0.8rem/1.5 var(--sans-body); color: var(--ink-soft); }

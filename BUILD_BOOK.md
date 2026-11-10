@@ -14,6 +14,7 @@ A journal of the real reasoning behind this build: decisions, options rejected, 
 - [Entry 10 — One add-on across four Google apps](#entry-10--one-add-on-across-four-google-apps)
 - [Entry 11 — Keep the preview handoff private and inert](#entry-11--keep-the-preview-handoff-private-and-inert)
 - [Entry 12 — Make layout and export failures explicit](#entry-12--make-layout-and-export-failures-explicit)
+- [Entry 13 — Recover safely and preserve document semantics](#entry-13--recover-safely-and-preserve-document-semantics)
 
 ## Entry 1 — Keep paper stock and lighting separate
 **Files touched:** `css/style.css`, `js/app.js`, `index.html`
@@ -375,3 +376,41 @@ All 26 native tests pass, including identical slide counts/line breaks for plain
 Focused Edge checks pass for blocked web fonts, conversion notices, Arabic direction, CJK display, combining accents, joined emoji, table alignment, compressed tiles without retained canvases, export locking, portrait image proportions (85 by 850 pixels), failed-chart blocking, and canvas cleanup after forced budget overflow. The browser preview and generated PNG were visually reviewed. The original Workspace handoff/chart/PDF/PNG check passes with no page exceptions. Expected console network errors come from deliberately blocked fonts and a deliberate broken image.
 
 The existing reader regression stage passes. The mobile/pagination probe passes all twelve width/paper combinations and produces eight contiguous PDF pages and four contiguous image tiles. Downloaded artifacts are 2,702,991 bytes for PDF and 3,825,231 bytes for ZIP. These are local browser checks and simulated Google responses, not live Google host tests. Exact font fitting, real-device memory behavior, OAuth, Gmail delivery rendering, and remote interruption recovery remain live acceptance checks; the README lists them explicitly.
+
+## Entry 13 — Recover safely and preserve document semantics
+**Files touched:** export, image, typography, journal, native adapters, setup and browser probes
+
+### Context
+The user requested closure of the remaining code gaps and product limitations. No Google test project exists yet, and the authenticated computer-use connection failed during initialization. Local code and engine verification can proceed without inventing live-host evidence.
+
+### Before you read on
+How can a static app offer searchable, structured output without pretending an image-only PDF has semantic document content?
+
+### Options considered
+- **Add invisible text over screenshots** — rejected because reading order and accessibility tags would still need to be reconstructed, and text could drift from the pixels.
+- **Chosen: semantic HTML printing plus an explicit tagged Chromium PDF command** — keep headings, tables, links, and alternatives in the browser document tree and let the browser's PDF engine preserve them.
+- **Decode then inspect image dimensions** — rejected because allocation has already happened.
+- **Chosen: bounded encoded-image reads and header inspection before assigning image src** — reject oversized/unsupported formats before the browser decoder sees the source.
+
+### Why
+The image-based PDF remains useful for exact raster appearance. A separate semantic output is needed for selectable text and structure. Remote Google image insertion requires public URLs, and Slides' API does not permit writing its text-autofit mode; native upgrades must respect these constraints rather than claiming full visual equivalence.
+
+### How to build it
+1. Add `bmdTasks.wait(promise, signal, deadline, lateCleanup)`. It removes timer/abort handlers on settlement and disposes a canvas arriving after cancellation. Give the export session an AbortController, a Cancel button/Escape action, and a two-minute overall deadline. Keep PDF/ZIP/tile waits abortable and never deliver a late result.
+2. Parse journal records defensively. Require known states, string fingerprints/timestamps, and allowlisted Google target URLs. A malformed record renders a recovery card and blocks writes instead of throwing during homepage creation. Preserve review-before-reset semantics.
+3. Check font families used by reading text, headings, code, tables, and captions. Provide an installed-font mode for all roles, not just the reading font. Do not claim this detects every missing glyph on every system.
+4. In the sanitizer, move safe image sources to `data-bmd-src` without assigning `src`. `bmdImages.hydrate` reads at most 8 MB per encoded source, inspects raster dimensions/animation headers, enforces per-image and document budgets, and only then assigns a blob URL. Reject uninspectable/animated sources and show decode failures. Revoke URLs/abort hydration on render replacement, editor close, and document dismissal.
+5. Preserve semantic HTML in `bmdPrint.prepare`. Remove controls/notices and floated drop caps, retain headings/tables/links/image alternatives, freeze image bytes, and print through the browser. Add a pinned Playwright development dependency and `tools/export-pdf.cjs`, which invokes Chromium with `tagged: true` and `outline: true`. Keep raster output as its own explicitly described path.
+6. Upgrade native adapters without broadening OAuth scopes. Docs inserts table structure then reads actual cell indices before filling cells from the end backward under a revision guard. Slides creates native table/image objects, with dedicated image slides and repeated headers for table splits. Sheets uses image cells and editable charts for supported Chart.js JSON. Public HTTPS images are never synthesized by publishing private data. Unsupported chart types stay in browser output or fail clearly in native Sheets.
+7. Run `npm test` and `npm run test:browsers`. The matrix uses the real editor UI and tests Chromium, Firefox, and WebKit at 375px and 1280px, including the visible Cancel button, late-canvas disposal, safe image loading, and oversized-header rejection before src assignment.
+8. Generate the PDF fixture with `npm run export:pdf -- --input test/fixtures/semantic.md --output output/pdf/semantic-verified.pdf`, inspect its Poppler-rendered PNG, and run `python tools/verify-pdf.py output/pdf/semantic-verified.pdf`. That verifier inspects the real PDF's text, outline, MarkInfo, and heading/table structure roles.
+
+### What went wrong
+Computer-use browser discovery failed twice with a host kernel/sandbox setup error. The user confirmed there is no Apps Script test project yet, so live Google installation and physical-device validation remain external prerequisites.
+
+The first Firefox matrix attempt used a synthetic clipboard event that did not load the document. Switching to the visible editor entry/fill/Done flow passed all three engines. The first tagged PDF detached the floated drop-cap letter from its sentence in extraction order; disabling semantic-output drop caps fixed full-sentence searching. These failures were found in generated/runtime behavior, not inferred from request mocks.
+
+### Verification and handoff
+All 35 native/browser primitive tests pass. Six browser-engine/width combinations pass layout, RTL, semantic output, abort handling, UI cancellation, valid image hydration, and oversized image rejection. The generated PDF has searchable sentences, CJK text, an outline, MarkInfo, and `/H1`, `/Table`, `/TH`, `/TD` roles; its rendered page was visually inspected. Tags are not a claim of independent PDF/UA certification.
+
+The add-on bundle builds, including optional preview-URL configuration. Source syntax and patch checks pass. Setup instructions are in `SETUP_GOOGLE_WORKSPACE.md`; `RELEASE_CHECKLIST.md` records the remaining live-host and physical-device acceptance. Native Google font fitting remains estimated, private images are not automatically made public, and charts in hosts other than Sheets remain source text with full visuals available in the browser. Those platform boundaries are explicit rather than reported as closed by local tests.

@@ -23,7 +23,7 @@ async (page) => {
   const fontError = await page.evaluate(async () => {
     try { await window.bmdExport(document.querySelector('#article')); return ''; } catch (e) { return e.message; }
   });
-  check(fontError.includes('Choose an installed typeface'), 'Fallback font export was silent');
+  check(fontError.includes('Use installed fonts'), 'Fallback font export was silent');
   await page.evaluate(() => {
     const select = document.querySelector('#prefTypeface'); select.value = 'georgia'; select.dispatchEvent(new Event('change', { bubbles: true }));
   });
@@ -39,7 +39,6 @@ async (page) => {
   await page.getByRole('button', { name: 'Download', exact: true }).click();
   await page.getByRole('button', { name: 'Download PNG image', exact: true }).click();
   await page.waitForFunction(() => window.captureEntered);
-  await page.keyboard.press('Escape');
   const locked = await page.evaluate(() => {
     document.querySelector('#newDocBtn').click();
     const data = new DataTransfer(); data.setData('text/plain', '# Changed');

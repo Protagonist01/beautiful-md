@@ -1,0 +1,12 @@
+{
+  "name": "beautiful-md",
+  "private": true,
+  "version": "0.1.0",
+  "scripts": {
+    "test": "node --test workspace-addon/test/*.test.cjs test/*.test.cjs",
+    "test:browsers": "node tools/browser-matrix.cjs",
+    "build:addon": "node workspace-addon/build.cjs",
+    "export:pdf": "node tools/export-pdf.cjs"
+  },
+  "devDependencies": { "playwright": "1.65.0" }
+}

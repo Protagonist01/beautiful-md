@@ -59,13 +59,13 @@ function bmdCard(e, compose) {
     } else section.addWidget(CardService.newTextButton().setText('Allow access to this file').setOnClickAction(bmdAction('requestEditorAccess')));
   }
   section.addWidget(CardService.newTextButton().setText('Open styled preview & exports').setOnClickAction(bmdAction('openStyledPreview')))
-    .addWidget(CardService.newTextParagraph().setText('Native conversion: images become descriptions; charts remain source code; Docs and Slides tables become tab-separated text; custom HTML becomes literal text. Use browser preview for full styling. Slides use conservative font estimates; review layout in Google.'))
+    .addWidget(CardService.newTextParagraph().setText('Native tables remain editable. Images require public HTTPS raster URLs; embedded/private images stay in browser preview. Sheets supports editable bar, line, pie, and doughnut charts; other hosts retain chart source. Custom HTML becomes literal text. Slides uses conservative font estimates; review layout in Google.'))
     .addWidget(CardService.newTextButton().setText('Clear saved input').setOnClickAction(bmdAction('clearSavedInput', { compose: compose ? 'true' : 'false' })));
   var last = BmdJournal.read();
   if (last) {
-    section.addWidget(CardService.newTextParagraph().setText(last.state === 'done' ? 'The last operation completed. Repeating the same input reopens its result.' : 'The last write has an uncertain result. Check the target or search recent files/drafts before starting another.'));
+    section.addWidget(CardService.newTextParagraph().setText(last.state === 'damaged' ? 'The saved operation record is damaged. Writes are blocked to prevent duplicates. Review recent files and Gmail Drafts, then use the recovery action below.' : last.state === 'done' ? 'The last operation completed. Repeating the same input reopens its result.' : 'The last write has an uncertain result. Check the target or search recent files/drafts before starting another.'));
     if (last.target) section.addWidget(CardService.newTextButton().setText('Review last result').setOnClickAction(bmdAction('reviewLastResult')));
-    section.addWidget(CardService.newTextButton().setText('I checked the result — allow a new operation').setOnClickAction(bmdAction('acknowledgeOperation', { compose: compose ? 'true' : 'false' })));
+    section.addWidget(CardService.newTextButton().setText(last.state === 'damaged' ? 'I reviewed recent files — reset damaged record' : 'I checked the result — allow a new operation').setOnClickAction(bmdAction('acknowledgeOperation', { compose: compose ? 'true' : 'false' })));
   }
   return CardService.newCardBuilder().setHeader(CardService.newCardHeader().setTitle('Beautiful MD').setSubtitle(labels[host])).addSection(section).build();
 }

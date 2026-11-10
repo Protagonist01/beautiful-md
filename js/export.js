@@ -1,8 +1,12 @@
 /* Stable export layout, independent of the viewport and scroll position. */
-window.bmdExport = async function (article, onProgress) {
-  const report = typeof onProgress === 'function' ? onProgress : function () {};
+window.bmdExport = async function (article, onProgress, options = {}) {
+  const signal = options.signal;
+  const wait = (promise, cleanup) => window.bmdTasks.wait(promise, signal, options.stepTimeout || 30000, cleanup);
+  const report = text => { window.bmdTasks.check(signal); if (typeof onProgress === 'function') onProgress(text); };
   if (!window.html2canvas) throw new Error('Image exporter is unavailable');
-  await window.bmdCharts.ready();
+  await wait(window.bmdImages.ready(article));
+  if (article.querySelector('[data-bmd-image-error]')) throw new Error('An image failed safe preflight. Replace or remove it before exporting.');
+  await wait(window.bmdCharts.ready());
   if (article.querySelector('.chart-error')) throw new Error('A chart could not render. Fix its source before exporting.');
   const surface = article.cloneNode(true);
   surface.removeAttribute('id');
@@ -40,11 +44,9 @@ window.bmdExport = async function (article, onProgress) {
   document.body.appendChild(surface);
   try {
     report('Waiting for type and pictures…');
-    let fontTimer;
-    try { await Promise.race([document.fonts.ready, new Promise((_, reject) => { fontTimer = setTimeout(() => reject(new Error('Fonts are still loading. Retry after they finish.')), 15000); })]); }
-    finally { clearTimeout(fontTimer); }
+    await wait(document.fonts.ready);
     const fontWarnings = window.bmdTypography.fontWarnings(surface);
-    if (fontWarnings.length) throw new Error(fontWarnings[0] + ' Choose an installed typeface such as Georgia before exporting.');
+    if (fontWarnings.length) throw new Error(fontWarnings[0] + ' Choose Use installed fonts in Typesetting before exporting.');
     for (const img of surface.querySelectorAll('img')) {
       img.loading = 'eager';
       const src = img.currentSrc || img.src;
@@ -54,12 +56,11 @@ window.bmdExport = async function (article, onProgress) {
         img.crossOrigin = 'anonymous';
         img.src = src;
       }
-      let timer;
       try {
-        await Promise.race([img.decode(), new Promise((_, reject) => { timer = setTimeout(() => reject(new Error('timeout')), 15000); })]);
+        await wait(img.decode());
       } catch (_) {
         throw new Error('Image could not load: ' + (img.alt || url.pathname.split('/').pop() || 'unnamed image') + '. Use an embedded image or a URL that permits cross-origin access.');
-      } finally { clearTimeout(timer); }
+      }
       if (img.naturalWidth * img.naturalHeight > 16000000) throw new Error('An image is too large to export safely. Resize it to at most 16 million pixels.');
       // Explicit dimensions avoid html2canvas's unsupported object-fit path.
       const available = surface.clientWidth - 72;
@@ -149,7 +150,7 @@ window.bmdExport = async function (article, onProgress) {
       const limit = Math.min(offset + tileHeight, totalHeight);
       const end = limit === totalHeight ? limit : nextBoundary(offset, limit, 0);
       const height = end - offset;
-      const content = await html2canvas(surface, {
+      const content = await wait(html2canvas(surface, {
         scale, width, height, x: 0, y: offset, scrollX: 0, scrollY: 0,
         backgroundColor: lined ? null : color, useCORS: true, logging: false,
         onclone: doc => {
@@ -157,7 +158,7 @@ window.bmdExport = async function (article, onProgress) {
           clone.style.background = 'transparent';
           doc.querySelectorAll('dialog, .settings-scrim, .toast').forEach(el => el.remove());
         }
-      });
+      }), canvas => { canvas.width = canvas.height = 0; });
       if (!content || !content.width || !content.height) {
         throw new Error('This device ran out of drawing memory. Try a narrower measure or a smaller text size.');
       }
@@ -180,7 +181,7 @@ window.bmdExport = async function (article, onProgress) {
       }
       ctx.drawImage(content, 0, 0);
       content.width = content.height = 0;
-        const blob = await new Promise(resolve => canvas.toBlob(resolve, 'image/png'));
+        const blob = await wait(new Promise(resolve => canvas.toBlob(resolve, 'image/png')));
         if (!blob) throw new Error('Could not encode an export tile.');
         encodedBytes += blob.size;
         if (encodedBytes > 32 * 1024 * 1024) throw new Error('Export exceeds the 32 MB image budget. Split the document into smaller files.');

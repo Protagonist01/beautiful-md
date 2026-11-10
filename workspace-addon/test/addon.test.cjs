@@ -361,3 +361,67 @@ test('excessive slide content is rejected before creating an empty file', () => 
   assert.match(JSON.stringify(ctx.createNative(event('slides', source))), /40 slides/);
   assert.equal(calls.length, 0);
 });
+
+test('corrupt and hostile operation records leave a recoverable card and block writes', () => {
+  const { ctx, user, calls } = runtime();
+  for (const raw of ['{broken', 'null', '{}', JSON.stringify({ state: 'done', fingerprint: 'a'.repeat(64), started: new Date().toISOString(), target: 'javascript:alert(1)' })]) {
+    user.bmdOperation = raw;
+    assert.match(JSON.stringify(ctx.onHomepage(event('docs'))), /reset damaged record/);
+    assert.match(JSON.stringify(ctx.createNative(event('docs'))), /damaged/);
+  }
+  assert.equal(calls.length, 0);
+  ctx.acknowledgeOperation(event('docs')); assert.equal(user.bmdOperation, undefined);
+  assert.match(JSON.stringify(ctx.onHomepage(event('docs'))), /Create new document/);
+});
+
+test('Docs uses actual Google-created table indices in descending order', () => {
+  const { ctx, calls } = runtime();
+  let readCount = 0;
+  ctx.respond = (url, options) => {
+    if (options.method === 'post') return {};
+    readCount++;
+    if (readCount === 1) return { body: { content: [{ endIndex: 2 }] }, revisionId: 'before' };
+    return { revisionId: 'after', body: { content: [{ startIndex: 2, endIndex: 20, table: { tableRows: [
+      { tableCells: [{ content: [{ startIndex: 5, paragraph: {} }] }, { content: [{ startIndex: 9, paragraph: {} }] }] },
+      { tableCells: [{ content: [{ startIndex: 14, paragraph: {} }] }, { content: [{ startIndex: 18, paragraph: {} }] }] }
+    ] } }] } };
+  };
+  ctx.insertNative(event('docs', '| H1 | H2 |\n|---|---|\n| A | B |', { docs: { id: 'table-doc', addonHasFileScopePermission: true } }));
+  assert.ok(calls[1].body.requests.some(r => r.insertTable));
+  const fills = calls[3].body.requests.filter(r => r.insertText);
+  assert.deepEqual(fills.map(r => r.insertText.location.index), [18, 14, 9, 5]);
+  assert.deepEqual(fills.map(r => r.insertText.text), ['B\n', 'A\n', 'H2\n', 'H1\n']);
+  assert.equal(calls[3].body.writeControl.requiredRevisionId, 'after');
+});
+
+test('Slides produces native tables and image objects instead of flattened descriptions', () => {
+  const { md } = runtime();
+  const table = md.slides(md.parse('# Table\n\n| Name | Value |\n|---|---|\n| A | **12** |'), 720, 405, 'table');
+  assert.equal(table.filter(r => r.createSlide).length, 1);
+  assert.equal(table.find(r => r.createTable).createTable.columns, 2);
+  assert.ok(table.some(r => r.insertText?.cellLocation && r.insertText.text === '12'));
+  const image = md.slides(md.parse('![Example](https://example.com/photo.png)'), 720, 405, 'image');
+  assert.equal(image.filter(r => r.createSlide).length, 1);
+  assert.equal(image.find(r => r.createImage).createImage.url, 'https://example.com/photo.png');
+  assert.equal(image.find(r => r.updatePageElementAltText).updatePageElementAltText.description, 'Example');
+});
+
+test('native image URLs are preserved safely across Docs, Sheets and Gmail', () => {
+  const { md } = runtime();
+  const blocks = md.parse('![A](https://example.com/image.png)');
+  assert.ok(md.docs(blocks, 1).some(r => r.insertInlineImage?.uri === 'https://example.com/image.png'));
+  assert.match(md.html(blocks), /<img src="https:\/\/example.com\/image.png" alt="A"/);
+  const cells = md.sheets(blocks, 0)[0].updateCells.rows[0].values;
+  assert.equal(cells[1].userEnteredValue.formulaValue, '=IMAGE("https://example.com/image.png",1)');
+  assert.throws(() => md.docs(md.parse('![A](data:image/png;base64,AAAA)'), 1), /public HTTPS/);
+});
+
+test('Sheets converts supported chart JSON into numeric data and an editable chart', () => {
+  const { md } = runtime();
+  const source = '```chart\n' + JSON.stringify({ type: 'bar', data: { labels: ['A', 'B'], datasets: [{ label: 'Readers', data: [12, 24] }] } }) + '\n```';
+  const requests = md.sheets(md.parse(source), 7);
+  assert.equal(requests[0].updateCells.rows[1].values[1].userEnteredValue.numberValue, 12);
+  assert.equal(requests.find(r => r.addChart).addChart.chart.spec.basicChart.chartType, 'COLUMN');
+  assert.equal(requests.find(r => r.addChart).addChart.chart.position.overlayPosition.anchorCell.sheetId, 7);
+  assert.throws(() => md.sheets(md.parse(source.replace('"bar"', '"radar"')), 7), /Native Sheets charts support/);
+});

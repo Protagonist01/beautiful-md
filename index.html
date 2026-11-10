@@ -154,6 +154,9 @@
       <button id="downloadPdfBtn" class="btn btn-solid" type="button">Download PDF</button>
       <button id="downloadImageBtn" class="btn btn-ghost" type="button">Download PNG image</button>
       <button id="downloadMdBtn" class="btn btn-ghost" type="button">Download Markdown</button>
+      <button id="downloadTextPdfBtn" class="btn btn-ghost" type="button">Print / searchable PDF</button>
+      <button id="downloadHtmlBtn" class="btn btn-ghost" type="button">Download accessible HTML</button>
+      <button id="exportCancel" class="btn btn-ghost" type="button" hidden>Cancel export</button>
     </div>
     <!-- Mobile browsers often refuse a download triggered after an await, so the
          finished file is also offered as a link the reader can tap. -->
@@ -280,6 +283,7 @@
     </div>
 
     <button id="resetPrefs" class="btn btn-ghost settings-reset" type="button">Reset to defaults</button>
+    <button id="prefLocalFonts" class="btn btn-ghost" type="button">Use installed fonts</button>
   </aside>
 
   <div id="toast" class="toast" role="status" aria-live="polite"></div>
@@ -290,10 +294,13 @@
   <script src="vendor/jspdf.umd.min.js"></script>
   <script src="vendor/jszip.min.js"></script>
   <script src="js/charts.js"></script>
+  <script src="js/tasks.js"></script>
+  <script src="js/images.js"></script>
   <script src="js/export.js"></script>
   <script src="js/editor.js"></script>
   <script src="js/sanitize.js"></script>
   <script src="js/typography.js"></script>
+  <script src="js/print.js"></script>
   <script src="js/app.js"></script>
 </body>
 </html>

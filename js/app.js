@@ -125,6 +125,7 @@
   const LEADING_MAP = { compact: "1.62", cozy: "1.78", airy: "1.95" };
 
   function applyPrefs() {
+    try { root.classList.toggle('local-fonts', localStorage.getItem('bmd-local-fonts') === 'true'); } catch (_) { /* storage unavailable */ }
     const size = SIZE_MAP[prefs.size] || SIZE_MAP.m;
     const leading = LEADING_MAP[prefs.leading] || LEADING_MAP.cozy;
     root.style.setProperty("--article-size", size);
@@ -298,11 +299,13 @@
 
   function renderMarkdown(source, fileName, origin) {
     if (root.dataset.exporting === 'true') return;
+    window.bmdImages.release(article);
     currentFileName = fileName || "document";
     currentSource = source;
     saveSession(source, fileName, false);
 
     article.innerHTML = toHTML(source);
+    window.bmdImages.hydrate(article).then(schedulePaperAlignment);
 
     let glitch = null;
     const safely = (step) => {
@@ -348,7 +351,9 @@
      can never drift apart. */
   function renderPreview(source, target) {
     if (root.dataset.exporting === 'true') return;
+    window.bmdImages.release(target);
     target.innerHTML = toHTML(source);
+    window.bmdImages.hydrate(target);
     const safely = (step) => { try { step(); } catch (err) { /* keep the rest */ } };
     safely(() => sanitizeEmbeds(target));
     safely(() => decorateHeadings(target));
@@ -632,6 +637,7 @@
     editBtn.classList.add("is-hidden");
     exportBtn.classList.add("is-hidden");
     body.classList.remove("reading");
+    window.bmdImages.release(article);
     article.innerHTML = "";
     currentSource = "";
     currentFileName = "document";
@@ -742,15 +748,18 @@
       tile.blob = null;
     });
   }
-  async function decodeTile(tile) {
+  async function decodeTile(tile, signal) {
     const url = URL.createObjectURL(tile.blob);
     const image = new Image(); image.src = url;
-    try { await image.decode(); return { image, release: () => { image.src = ''; URL.revokeObjectURL(url); } }; }
+    try { await window.bmdTasks.wait(image.decode(), signal); return { image, release: () => { image.src = ''; URL.revokeObjectURL(url); } }; }
     catch (error) { URL.revokeObjectURL(url); throw error; }
   }
 
   let exporting = false;
-  exportDialog.addEventListener('cancel', event => { if (exporting) event.preventDefault(); });
+  let activeExport = null;
+  const cancelExport = () => activeExport?.abort(new Error('Export cancelled.'));
+  $('#exportCancel').addEventListener('click', cancelExport);
+  exportDialog.addEventListener('cancel', event => { if (exporting) { event.preventDefault(); cancelExport(); } });
   // Keep the document and typography stable until all asynchronous work ends.
   ['click', 'keydown', 'paste', 'drop', 'change'].forEach(type => document.addEventListener(type, event => {
     if (!exporting) return;
@@ -761,19 +770,41 @@
 
   async function runExport(kind) {
     if (exporting) return;
+    const printWindow = kind === 'print' ? window.open('', '_blank') : null;
     resetExportUI();
     exporting = true;
+    const controller = new AbortController(); activeExport = controller;
+    const signal = controller.signal;
+    const deadline = setTimeout(() => controller.abort(new Error('Export exceeded two minutes. Try a smaller document.')), 120000);
+    const wait = promise => window.bmdTasks.wait(promise, signal);
+    const checkpoint = () => window.bmdTasks.check(signal);
+    $('#exportCancel').hidden = false;
     exportClose.disabled = true;
     exportDialog.setAttribute('aria-busy', 'true');
     root.dataset.exporting = 'true';
     const fileName = currentFileName;
     const source = currentSource;
-    [downloadPdfBtn, downloadImageBtn, downloadMdBtn].forEach((b) => { b.disabled = true; });
+    const exportButtons = [downloadPdfBtn, downloadImageBtn, downloadMdBtn, $('#downloadTextPdfBtn'), $('#downloadHtmlBtn')];
+    exportButtons.forEach((b) => { b.disabled = true; });
     exportSaveLink.hidden = true;
     setExportStatus("Preparing…");
 
     let capture = null;
     try {
+      if (kind === 'print' || kind === 'html') {
+        if (kind === 'print' && !printWindow) throw new Error('Allow popups to open the print dialog, or download accessible HTML instead.');
+        const html = await window.bmdPrint.prepare(article, { signal }); checkpoint();
+        if (kind === 'html') deliverFile(new Blob([html], { type: 'text/html;charset=utf-8' }), exportName('html', fileName));
+        else {
+          printWindow.document.open();
+          const printLoaded = new Promise(resolve => { printWindow.onload = resolve; });
+          printWindow.document.write(html); printWindow.document.close(); printWindow.opener = null;
+          await wait(printLoaded);
+          await wait(printWindow.document.fonts.ready); checkpoint(); printWindow.focus(); printWindow.print();
+        }
+        setExportStatus(kind === 'print' ? 'Choose Save as PDF in the print dialog. Text remains searchable; PDF tagging depends on your browser. Use the verified tagged-PDF command for a tagged file.' : 'Accessible HTML is ready to save.');
+        return;
+      }
       if (kind === "md") {
         deliverFile(new Blob([source], { type: "text/markdown;charset=utf-8" }), exportName("md", fileName));
         setExportStatus("Ready — tap below if the download did not start.");
@@ -781,7 +812,8 @@
       }
 
       await new Promise((resolve) => requestAnimationFrame(resolve));
-      capture = await window.bmdExport(article, setExportStatus);
+      capture = await window.bmdExport(article, setExportStatus, { signal });
+      checkpoint();
 
       if (kind === "image") {
         previewOutput(capture.tiles[0].blob, capture.tiles.length > 1 ? 'First exported image — the ZIP contains all numbered images.' : 'Exported image');
@@ -801,7 +833,8 @@
             zip.file(stem + "-" + String(i + 1).padStart(2, "0") + ".png", blob);
           }
           setExportStatus("Packing the archive…");
-          deliverFile(await zip.generateAsync({ type: "blob" }), exportName("zip", fileName));
+          const packed = await wait(zip.generateAsync({ type: "blob" }));
+          checkpoint(); deliverFile(packed, exportName("zip", fileName));
         }
       } else {
         if (!window.jspdf || !window.jspdf.jsPDF) throw new Error("PDF exporter is unavailable");
@@ -811,6 +844,7 @@
         let offset = 0;
         let page = 0;
         while (offset < capture.height) {
+          checkpoint();
           setExportStatus("Building PDF page " + (page + 1) + " of " + capture.pages.length + "…");
           const height = capture.pages[page].height;
           const slice = document.createElement("canvas");
@@ -823,7 +857,7 @@
             const top = Math.max(offset, tile.start);
             const bottom = Math.min(offset + height, tile.start + tile.height);
             if (bottom > top) {
-              const decoded = await decodeTile(tile);
+              const decoded = await decodeTile(tile, signal);
               try { context.drawImage(decoded.image, 0, top - tile.start, capture.width, bottom - top, 0, top - offset, capture.width, bottom - top); }
               finally { decoded.release(); }
             }
@@ -833,7 +867,7 @@
           pdf.rect(0, 0, 210, 297, "F");
           pdf.addImage(slice.toDataURL("image/png"), "PNG", 12, 12, pageWidth, height * pageWidth / capture.width, undefined, "FAST");
           if (page === 1) {
-            const preview = await new Promise(resolve => slice.toBlob(resolve, 'image/png'));
+            const preview = await wait(new Promise(resolve => slice.toBlob(resolve, 'image/png')));
             if (preview) previewOutput(preview, 'First PDF page — review the downloaded PDF for all pages.');
           }
           /* Phones hold every canvas in a limited pool — let each page go */
@@ -842,26 +876,31 @@
           await new Promise((resolve) => setTimeout(resolve, 0));
         }
         setExportStatus("Writing the file…");
-        deliverFile(pdf.output("blob"), exportName("pdf", fileName));
+        checkpoint(); deliverFile(pdf.output("blob"), exportName("pdf", fileName));
       }
       setExportStatus("Ready — tap below if the download did not start.");
     } catch (err) {
+      if (printWindow && !printWindow.closed) printWindow.close();
       const message = err && err.message ? err.message : "unknown error";
       setExportStatus("Could not export: " + message);
       toast("Could not export: " + message);
     } finally {
+      clearTimeout(deadline); activeExport = null;
+      $('#exportCancel').hidden = true;
       if (capture) releaseTiles(capture);
       exporting = false;
       exportClose.disabled = false;
       exportDialog.removeAttribute('aria-busy');
       delete root.dataset.exporting;
-      [downloadPdfBtn, downloadImageBtn, downloadMdBtn].forEach((b) => { b.disabled = false; });
+      exportButtons.forEach((b) => { b.disabled = false; });
     }
   }
 
   downloadPdfBtn.addEventListener("click", () => runExport("pdf"));
   downloadImageBtn.addEventListener("click", () => runExport("image"));
   downloadMdBtn.addEventListener("click", () => runExport("md"));
+  $('#downloadTextPdfBtn').addEventListener('click', () => runExport('print'));
+  $('#downloadHtmlBtn').addEventListener('click', () => runExport('html'));
 
   /* ---------------- file handling ---------------- */
 
@@ -1023,6 +1062,7 @@
   });
 
   $("#resetPrefs").addEventListener("click", () => {
+    try { localStorage.removeItem('bmd-local-fonts'); } catch (_) { /* storage unavailable */ }
     prefs = { ...DEFAULT_PREFS };
     savePrefs();
     applyPrefs();
@@ -1030,6 +1070,13 @@
   });
 
   applyPrefs();
+  $('#prefLocalFonts').addEventListener('click', () => {
+    try { localStorage.setItem('bmd-local-fonts', 'true'); } catch (_) { /* storage unavailable */ }
+    prefs.typeface = 'georgia'; savePrefs(); applyPrefs();
+    root.classList.add('local-fonts');
+    document.querySelectorAll('.article').forEach(target => target._bmdRefreshNotice?.());
+    toast('Using installed fonts for reading, headings, and code.');
+  });
 
   /* Initial render: a shareable #md= link wins, then the last session.
      #paper=<id> pins a paper stock for the visit. */
