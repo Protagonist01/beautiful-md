@@ -33,8 +33,11 @@ async (page) => {
   await page.locator('#article img[src="invalid"]').evaluateAll(images => images.forEach(image => image.remove()));
   await page.getByRole('button', { name: 'Download', exact: true }).click();
   for (const [label, name] of [['Download PDF', 'workspace-preview.pdf'], ['Download PNG image', 'workspace-export.png']]) {
-    const downloadPromise = page.waitForEvent('download', { timeout: 60000 });
     await page.getByRole('button', { name: label, exact: true }).click();
+    await page.waitForFunction(() => !document.querySelector('#downloadPdfBtn').disabled);
+    if (await page.locator('#exportSaveLink').isHidden()) throw new Error(await page.locator('#exportStatus').textContent());
+    const downloadPromise = page.waitForEvent('download', { timeout: 30000 });
+    await page.locator('#exportSaveLink').click();
     const download = await downloadPromise;
     if (await download.failure()) throw new Error('Export failed: ' + name);
     await download.saveAs('output/playwright/' + name);

@@ -3,11 +3,12 @@ window.bmdExport = async function (article, onProgress) {
   const report = typeof onProgress === 'function' ? onProgress : function () {};
   if (!window.html2canvas) throw new Error('Image exporter is unavailable');
   await window.bmdCharts.ready();
+  if (article.querySelector('.chart-error')) throw new Error('A chart could not render. Fix its source before exporting.');
   const surface = article.cloneNode(true);
   surface.removeAttribute('id');
   surface.classList.add('export-surface');
   surface.setAttribute('aria-hidden', 'true');
-  surface.querySelectorAll('.anchor, .copy-btn').forEach(el => el.remove());
+  surface.querySelectorAll('.anchor, .copy-btn, .render-notice').forEach(el => el.remove());
   surface.querySelectorAll('[id]').forEach(el => el.removeAttribute('id'));
   Array.from(surface.children).forEach(el => { el.style.paddingBottom = ''; });
   const root = document.documentElement;
@@ -27,7 +28,9 @@ window.bmdExport = async function (article, onProgress) {
       if (!match) continue;
       const range = document.createRange();
       range.setStart(text, match.index);
-      range.setEnd(text, match.index + Array.from(text.textContent.slice(match.index))[0].length);
+      const letter = window.bmdTypography.firstGrapheme(text.textContent.slice(match.index));
+      if (!letter) break;
+      range.setEnd(text, match.index + letter.length);
       const span = document.createElement('span');
       span.className = 'export-dropcap';
       range.surroundContents(span);
@@ -37,8 +40,12 @@ window.bmdExport = async function (article, onProgress) {
   document.body.appendChild(surface);
   try {
     report('Waiting for type and pictures…');
-    await document.fonts.ready;
-    await Promise.all(Array.from(surface.querySelectorAll('img')).map(async img => {
+    let fontTimer;
+    try { await Promise.race([document.fonts.ready, new Promise((_, reject) => { fontTimer = setTimeout(() => reject(new Error('Fonts are still loading. Retry after they finish.')), 15000); })]); }
+    finally { clearTimeout(fontTimer); }
+    const fontWarnings = window.bmdTypography.fontWarnings(surface);
+    if (fontWarnings.length) throw new Error(fontWarnings[0] + ' Choose an installed typeface such as Georgia before exporting.');
+    for (const img of surface.querySelectorAll('img')) {
       img.loading = 'eager';
       const src = img.currentSrc || img.src;
       if (!src) throw new Error('An image has no source');
@@ -53,12 +60,20 @@ window.bmdExport = async function (article, onProgress) {
       } catch (_) {
         throw new Error('Image could not load: ' + (img.alt || url.pathname.split('/').pop() || 'unnamed image') + '. Use an embedded image or a URL that permits cross-origin access.');
       } finally { clearTimeout(timer); }
-    }));
+      if (img.naturalWidth * img.naturalHeight > 16000000) throw new Error('An image is too large to export safely. Resize it to at most 16 million pixels.');
+      // Explicit dimensions avoid html2canvas's unsupported object-fit path.
+      const available = surface.clientWidth - 72;
+      const factor = Math.min(1, available / img.naturalWidth, 850 / img.naturalHeight);
+      img.style.width = Math.max(1, Math.floor(img.naturalWidth * factor)) + 'px';
+      img.style.height = Math.max(1, Math.floor(img.naturalHeight * factor)) + 'px';
+      img.style.objectFit = 'fill';
+    }
     const style = getComputedStyle(surface);
     const vars = getComputedStyle(root);
     const color = vars.getPropertyValue('--paper-raised').trim();
     const width = surface.offsetWidth;
     const totalHeight = surface.scrollHeight;
+    if (totalHeight > 200000) throw new Error('This document is too long to export safely. Split it into smaller documents.');
     const scale = 2;
     const pageHeight = Math.floor(width * 273 / 186);
     /* Phone browsers refuse canvases past roughly 16.7M pixels of area, and
@@ -124,8 +139,10 @@ window.bmdExport = async function (article, onProgress) {
       const end = limit === totalHeight ? limit : nextBoundary(pos, limit, pageHeight * 0.3);
       pages.push({ start: pos * scale, height: (end - pos) * scale });
       pos = end;
+      if (pages.length > 200) throw new Error('Export is limited to 200 pages. Split the document into smaller files.');
     }
     const tiles = [];
+    let encodedBytes = 0;
     const tileEstimate = Math.max(1, Math.ceil(totalHeight / tileHeight));
     for (let offset = 0; offset < totalHeight;) {
       report('Rendering the page — part ' + (tiles.length + 1) + ' of ' + tileEstimate + '…');
@@ -146,7 +163,9 @@ window.bmdExport = async function (article, onProgress) {
       }
       const canvas = document.createElement('canvas');
       canvas.width = content.width; canvas.height = content.height;
+      try {
       const ctx = canvas.getContext('2d');
+      if (!ctx) { content.width = content.height = canvas.width = canvas.height = 0; throw new Error('Drawing memory is unavailable. Try a smaller document.'); }
       ctx.fillStyle = color; ctx.fillRect(0, 0, canvas.width, canvas.height);
       if (lined) {
         const period = parseFloat(style.lineHeight);
@@ -160,7 +179,13 @@ window.bmdExport = async function (article, onProgress) {
         }
       }
       ctx.drawImage(content, 0, 0);
-      tiles.push({ canvas, start: offset * scale });
+      content.width = content.height = 0;
+        const blob = await new Promise(resolve => canvas.toBlob(resolve, 'image/png'));
+        if (!blob) throw new Error('Could not encode an export tile.');
+        encodedBytes += blob.size;
+        if (encodedBytes > 32 * 1024 * 1024) throw new Error('Export exceeds the 32 MB image budget. Split the document into smaller files.');
+        tiles.push({ blob, width: canvas.width, height: canvas.height, start: offset * scale });
+      } finally { content.width = content.height = canvas.width = canvas.height = 0; }
       offset = end;
     }
     return { tiles, width: width * scale, height: totalHeight * scale, pages, color };

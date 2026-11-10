@@ -18,7 +18,7 @@
       "name": "Beautiful MD",
       "logoUrl": "https://www.gstatic.com/images/branding/product/1x/docs_48dp.png",
       "layoutProperties": { "primaryColor": "#a13a22", "secondaryColor": "#342b25" },
-      "openLinkUrlPrefixes": ["https://docs.google.com/"],
+      "openLinkUrlPrefixes": ["https://docs.google.com/", "https://mail.google.com/"],
       "homepageTrigger": { "runFunction": "onHomepage" }
     },
     "docs": { "onFileScopeGrantedTrigger": { "runFunction": "onHomepage" } },

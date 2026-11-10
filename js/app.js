@@ -143,6 +143,7 @@
     body.classList.toggle("measure-narrow", prefs.measure === "narrow");
     body.classList.toggle("measure-wide", prefs.measure === "wide");
     syncSettingsUI();
+    document.querySelectorAll('.article').forEach(target => target._bmdRefreshNotice?.());
     schedulePaperAlignment();
   }
 
@@ -278,7 +279,25 @@
     return "<pre><code>" + escapeHTML(source) + "</code></pre>";
   }
 
+  function displayNotices(target) {
+    target.dataset.conversionWarnings = JSON.stringify(window.bmdSanitizeHTML.warnings || []);
+    window.bmdTypography.decorate(target);
+    function refresh() {
+      target.querySelector('.render-notice')?.remove();
+      const warnings = JSON.parse(target.dataset.conversionWarnings || '[]').concat(window.bmdTypography.fontWarnings(target));
+      if (!warnings.length) return;
+      const notice = document.createElement('aside');
+      notice.className = 'render-notice'; notice.setAttribute('role', 'status');
+      notice.textContent = warnings.join(' ');
+      target.prepend(notice);
+    }
+    target._bmdRefreshNotice = refresh;
+    refresh();
+    if (document.fonts) document.fonts.ready.then(() => { if (target.isConnected) refresh(); });
+  }
+
   function renderMarkdown(source, fileName, origin) {
+    if (root.dataset.exporting === 'true') return;
     currentFileName = fileName || "document";
     currentSource = source;
     saveSession(source, fileName, false);
@@ -296,6 +315,7 @@
     safely(() => polishLinks(article));
     safely(() => insertDocHead(fileName));
     safely(() => addDropCap(article));
+    safely(() => displayNotices(article));
     safely(buildToc);
     safely(() => setTitle(source));
     if (glitch) {
@@ -327,6 +347,7 @@
      minus the byline, the contents and the session write — so the two views
      can never drift apart. */
   function renderPreview(source, target) {
+    if (root.dataset.exporting === 'true') return;
     target.innerHTML = toHTML(source);
     const safely = (step) => { try { step(); } catch (err) { /* keep the rest */ } };
     safely(() => sanitizeEmbeds(target));
@@ -335,6 +356,7 @@
     safely(() => wrapTables(target));
     safely(() => polishLinks(target));
     safely(() => addDropCap(target));
+    safely(() => displayNotices(target));
     /* Anchors would collide with the reader's ids and hijack the URL */
     target.querySelectorAll(".anchor").forEach((a) => a.remove());
     target.querySelectorAll("[id]").forEach((el) => el.removeAttribute("id"));
@@ -637,6 +659,7 @@
   }
 
   function closeExportDialog() {
+    if (exporting) return;
     if (typeof exportDialog.close === "function") exportDialog.close();
     else exportDialog.removeAttribute("open");
     resetExportUI();
@@ -649,12 +672,20 @@
   });
   exportDialog.addEventListener("close", resetExportUI);
 
-  function exportName(extension) {
-    const stem = currentFileName.replace(/\.[^.]+$/, "").replace(/[^a-z0-9._-]+/gi, "-").replace(/^-+|-+$/g, "") || "document";
+  function exportName(extension, fileName = currentFileName) {
+    const stem = fileName.replace(/\.[^.]+$/, "").replace(/[^a-z0-9._-]+/gi, "-").replace(/^-+|-+$/g, "") || "document";
     return stem + "." + extension;
   }
 
   let deliveredUrl = null;
+  let previewUrl = null;
+  function previewOutput(blob, caption) {
+    if (previewUrl) URL.revokeObjectURL(previewUrl);
+    previewUrl = URL.createObjectURL(blob);
+    $('#exportPreviewImage').src = previewUrl;
+    $('#exportPreviewCaption').textContent = caption;
+    $('#exportPreview').hidden = false;
+  }
 
   function setExportStatus(text) {
     if (!text) {
@@ -667,6 +698,9 @@
   }
 
   function resetExportUI() {
+    $('#exportPreview').hidden = true;
+    $('#exportPreviewImage').removeAttribute('src');
+    if (previewUrl) { URL.revokeObjectURL(previewUrl); previewUrl = null; }
     setExportStatus("");
     exportSaveLink.hidden = true;
     exportSaveLink.removeAttribute("href");
@@ -705,16 +739,35 @@
 
   function releaseTiles(capture) {
     capture.tiles.forEach((tile) => {
-      tile.canvas.width = 0;
-      tile.canvas.height = 0;
+      tile.blob = null;
     });
+  }
+  async function decodeTile(tile) {
+    const url = URL.createObjectURL(tile.blob);
+    const image = new Image(); image.src = url;
+    try { await image.decode(); return { image, release: () => { image.src = ''; URL.revokeObjectURL(url); } }; }
+    catch (error) { URL.revokeObjectURL(url); throw error; }
   }
 
   let exporting = false;
+  exportDialog.addEventListener('cancel', event => { if (exporting) event.preventDefault(); });
+  // Keep the document and typography stable until all asynchronous work ends.
+  ['click', 'keydown', 'paste', 'drop', 'change'].forEach(type => document.addEventListener(type, event => {
+    if (!exporting) return;
+    if (!exportDialog.contains(event.target) || type === 'paste' || type === 'drop') {
+      event.preventDefault(); event.stopImmediatePropagation();
+    }
+  }, true));
 
   async function runExport(kind) {
     if (exporting) return;
+    resetExportUI();
     exporting = true;
+    exportClose.disabled = true;
+    exportDialog.setAttribute('aria-busy', 'true');
+    root.dataset.exporting = 'true';
+    const fileName = currentFileName;
+    const source = currentSource;
     [downloadPdfBtn, downloadImageBtn, downloadMdBtn].forEach((b) => { b.disabled = true; });
     exportSaveLink.hidden = true;
     setExportStatus("Preparing…");
@@ -722,7 +775,7 @@
     let capture = null;
     try {
       if (kind === "md") {
-        deliverFile(new Blob([currentSource], { type: "text/markdown;charset=utf-8" }), exportName("md"));
+        deliverFile(new Blob([source], { type: "text/markdown;charset=utf-8" }), exportName("md", fileName));
         setExportStatus("Ready — tap below if the download did not start.");
         return;
       }
@@ -731,23 +784,24 @@
       capture = await window.bmdExport(article, setExportStatus);
 
       if (kind === "image") {
+        previewOutput(capture.tiles[0].blob, capture.tiles.length > 1 ? 'First exported image — the ZIP contains all numbered images.' : 'Exported image');
         if (capture.tiles.length === 1) {
           setExportStatus("Encoding the image…");
-          const blob = await new Promise((resolve) => capture.tiles[0].canvas.toBlob(resolve, "image/png"));
+          const blob = capture.tiles[0].blob;
           if (!blob) throw new Error("Could not encode image");
-          deliverFile(blob, exportName("png"));
+          deliverFile(blob, exportName("png", fileName));
         } else {
           if (!window.JSZip) throw new Error("Image packager is unavailable");
           const zip = new window.JSZip();
-          const stem = exportName("png").replace(/\.png$/, "");
+          const stem = exportName("png", fileName).replace(/\.png$/, "");
           for (let i = 0; i < capture.tiles.length; i++) {
             setExportStatus("Encoding image " + (i + 1) + " of " + capture.tiles.length + "…");
-            const blob = await new Promise((resolve) => capture.tiles[i].canvas.toBlob(resolve, "image/png"));
+            const blob = capture.tiles[i].blob;
             if (!blob) throw new Error("Could not encode image");
             zip.file(stem + "-" + String(i + 1).padStart(2, "0") + ".png", blob);
           }
           setExportStatus("Packing the archive…");
-          deliverFile(await zip.generateAsync({ type: "blob" }), exportName("zip"));
+          deliverFile(await zip.generateAsync({ type: "blob" }), exportName("zip", fileName));
         }
       } else {
         if (!window.jspdf || !window.jspdf.jsPDF) throw new Error("PDF exporter is unavailable");
@@ -762,26 +816,33 @@
           const slice = document.createElement("canvas");
           slice.width = capture.width;
           slice.height = height;
+          try {
           const context = slice.getContext("2d");
+          if (!context) throw new Error('Not enough drawing memory for a PDF page.');
           for (const tile of capture.tiles) {
             const top = Math.max(offset, tile.start);
-            const bottom = Math.min(offset + height, tile.start + tile.canvas.height);
+            const bottom = Math.min(offset + height, tile.start + tile.height);
             if (bottom > top) {
-              context.drawImage(tile.canvas, 0, top - tile.start, capture.width, bottom - top, 0, top - offset, capture.width, bottom - top);
+              const decoded = await decodeTile(tile);
+              try { context.drawImage(decoded.image, 0, top - tile.start, capture.width, bottom - top, 0, top - offset, capture.width, bottom - top); }
+              finally { decoded.release(); }
             }
           }
           if (page++) pdf.addPage();
           pdf.setFillColor(capture.color);
           pdf.rect(0, 0, 210, 297, "F");
           pdf.addImage(slice.toDataURL("image/png"), "PNG", 12, 12, pageWidth, height * pageWidth / capture.width, undefined, "FAST");
+          if (page === 1) {
+            const preview = await new Promise(resolve => slice.toBlob(resolve, 'image/png'));
+            if (preview) previewOutput(preview, 'First PDF page — review the downloaded PDF for all pages.');
+          }
           /* Phones hold every canvas in a limited pool — let each page go */
-          slice.width = 0;
-          slice.height = 0;
+          } finally { slice.width = 0; slice.height = 0; }
           offset += height;
           await new Promise((resolve) => setTimeout(resolve, 0));
         }
         setExportStatus("Writing the file…");
-        deliverFile(pdf.output("blob"), exportName("pdf"));
+        deliverFile(pdf.output("blob"), exportName("pdf", fileName));
       }
       setExportStatus("Ready — tap below if the download did not start.");
     } catch (err) {
@@ -791,6 +852,9 @@
     } finally {
       if (capture) releaseTiles(capture);
       exporting = false;
+      exportClose.disabled = false;
+      exportDialog.removeAttribute('aria-busy');
+      delete root.dataset.exporting;
       [downloadPdfBtn, downloadImageBtn, downloadMdBtn].forEach((b) => { b.disabled = false; });
     }
   }

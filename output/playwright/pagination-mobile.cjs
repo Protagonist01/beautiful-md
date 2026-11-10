@@ -67,8 +67,8 @@ const fs = require('node:fs');
         }
         let tileEnd = 0;
         for (const tile of result.tiles) {
-          if (tile.start !== tileEnd || tile.canvas.height <= 0) throw new Error('Tile gap or empty tile');
-          tileEnd += tile.canvas.height;
+          if (tile.start !== tileEnd || tile.height <= 0 || !tile.blob?.size || tile.canvas) throw new Error('Tile gap, raw canvas, or empty tile');
+          tileEnd += tile.height;
         }
         return { pages: result.pages.length, tiles: result.tiles.length, covered: position === result.height && tileEnd === result.height, clean: !document.querySelector('.export-surface') };
       } catch (err) { return { error: err.message }; }
@@ -79,8 +79,11 @@ const fs = require('node:fs');
     assert.ok(capture.pages > 1 && capture.tiles > 1 && capture.covered && capture.clean);
     for (const [button, extension] of [['#downloadPdfBtn', 'pdf'], ['#downloadImageBtn', 'zip']]) {
       await page.locator('#exportBtn').click();
-      const pending = page.waitForEvent('download', { timeout: 120000 });
       await page.locator(button).click();
+      await page.waitForFunction(() => !document.querySelector('#downloadPdfBtn').disabled, { timeout: 120000 });
+      assert.ok(await page.locator('#exportSaveLink').isVisible(), await page.locator('#exportStatus').textContent());
+      const pending = page.waitForEvent('download', { timeout: 30000 });
+      await page.locator('#exportSaveLink').click();
       const download = await pending;
       assert.ok(download.suggestedFilename().endsWith('.' + extension));
       const file = 'output/playwright/oversized-row.' + extension;

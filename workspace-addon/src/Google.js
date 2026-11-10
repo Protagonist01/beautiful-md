@@ -93,16 +93,27 @@ var BmdGoogle = (function () {
   }
   function convert(host, title, blocks, event, insert) {
     if (!endpoints[host]) throw new Error('Open this action in Docs, Sheets, or Slides.');
+    BmdMarkdown.validateNative(blocks);
+    // Catch deterministic content failures before creating an empty file.
+    if (host === 'slides' && !insert) BmdMarkdown.slides(blocks, 720, 405, 'preflight');
+    if (host === 'sheets') {
+      var rows = BmdMarkdown.sheets(blocks, 0)[0].updateCells.rows;
+      if (rows.length > 1000 || rows.some(function (row) { return row.values.length > 100; })) throw new Error('Use at most 1,000 rows and 100 columns per conversion.');
+    }
     var id;
     if (insert) id = fileContext(event, host);
-    else {
+    function url() { return 'https://docs.google.com/' + { docs: 'document', sheets: 'spreadsheets', slides: 'presentation' }[host] + '/d/' + encodeURIComponent(id) + '/edit'; }
+    var operation = BmdJournal.begin([host, title, blocks, insert ? id : 'create'], id ? url() : '');
+    if (operation.state === 'done') return operation.target;
+    if (!insert) {
       var created = api(endpoints[host], 'post', host === 'sheets' ? { properties: { title: title } } : { title: title });
       id = created.documentId || created.spreadsheetId || created.presentationId;
       if (!id) throw new Error('Google did not return the new file ID.');
     }
-    if (host === 'docs') return writeDoc(id, blocks);
-    if (host === 'sheets') return writeSheet(id, blocks, title, insert);
-    return writeSlides(id, blocks);
+    BmdJournal.target(operation, url());
+    var result = host === 'docs' ? writeDoc(id, blocks) : host === 'sheets' ? writeSheet(id, blocks, title, insert) : writeSlides(id, blocks);
+    BmdJournal.done(operation, result);
+    return result;
   }
   return { convert: convert, fileContext: fileContext, docTarget: docTarget, points: points };
 })();

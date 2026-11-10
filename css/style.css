@@ -1669,4 +1669,11 @@ body.locked { overflow: hidden; }
 .article.export-surface pre code { font-size: 0.84rem; }
 .article.export-surface .chart-figure { padding: 20px; }
 .chart-figure { margin-inline: 0; }
+.render-notice { padding: 12px 16px; margin-bottom: 24px; font: 0.85rem/1.5 var(--sans-body); color: var(--ink); border-inline-start: 3px solid var(--accent); background: var(--paper-raised); }
+#exportPreview { margin: 20px 0 0; }
+#exportPreview img { display: block; width: 100%; max-height: 320px; object-fit: contain; }
+#exportPreview figcaption { margin-top: 8px; font: 0.8rem/1.5 var(--sans-body); color: var(--ink-soft); }
+.article :is(p, li, blockquote, td, th)[dir="auto"] { unicode-bidi: plaintext; }
+.article :is(pre, code) { unicode-bidi: plaintext; }
+.article .dropcap[dir="rtl"]::first-letter { float: none; font: inherit; }
 @media (max-width: 760px) { .chart-figure { padding: 12px; } }

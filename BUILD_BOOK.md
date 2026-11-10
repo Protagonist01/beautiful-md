@@ -13,6 +13,7 @@ A journal of the real reasoning behind this build: decisions, options rejected, 
 - [Entry 9 — Let oversized rows continue across pages](#entry-9--let-oversized-rows-continue-across-pages)
 - [Entry 10 — One add-on across four Google apps](#entry-10--one-add-on-across-four-google-apps)
 - [Entry 11 — Keep the preview handoff private and inert](#entry-11--keep-the-preview-handoff-private-and-inert)
+- [Entry 12 — Make layout and export failures explicit](#entry-12--make-layout-and-export-failures-explicit)
 
 ## Entry 1 — Keep paper stock and lighting separate
 **Files touched:** `css/style.css`, `js/app.js`, `index.html`
@@ -335,3 +336,42 @@ Skipping analytics for the visit prevents the Workspace handoff from entering an
 The first browser check navigated between fragments on the same page, so startup did not rerun; navigating through `about:blank` fixed the test. The chart check initially looked for a live canvas, but this renderer converts charts into image figures and destroys the canvas. Download checks also needed the actual button names. A stale download promise from a failed test interrupted a later call; restarting the browser session produced a clean full run. A simulated Docs response in the Node harness incorrectly unwrapped the document body, which was corrected before all 16 tests passed.
 
 The existing reader regression stage also passed after sanitization: contents and heading anchors, all twelve papers, all six font stacks, ink toggles, reader/editor chart rendering, clipboard paste, dragged text, and no page exceptions. Final build and all 16 add-on tests passed again. Live Google account validation remains outstanding.
+
+## Entry 12 — Make layout and export failures explicit
+**Files touched:** `workspace-addon/src/`, `js/`, `css/style.css`, tests
+
+### Context
+The audit reproduced formatting-dependent slide counts and identified whitespace loss, stripped Unicode shifting Google indices, inherited document styles, retained export canvases, changing export settings, and uncertain remote writes. This entry extends Entries 10 and 11 rather than replacing their architecture.
+
+### Before you read on
+Which parts can be made deterministic locally, and which remote outcomes must be recorded as uncertain instead of retried?
+
+### Options considered
+- **Keep all raw canvases until packaging** — rejected because per-canvas limits do not bound total memory.
+- **Chosen: compress tiles immediately, decode only the tile currently needed, and cap total output** — preserves the current page assembly without retaining every raw bitmap.
+- **Automatically retry native writes** — rejected because a timeout can follow a successful write.
+- **Chosen: persist operation state before mutation and require review before repeating uncertain writes** — prevents silent duplicate creation/insertion.
+
+### Why
+A local failure must not become a silent change to meaning. Formatting spans must not count as lines; code whitespace must survive Gmail; unsupported content and missing fonts need visible notices. Google-native layout still requires host verification, so conservative fitting and explicit limits are safer than claiming browser-level measurement on Apps Script.
+
+### How to build it
+1. Parse Markdown into runs, then validate the decoded visible text before native conversion. Reject characters stripped by Google before computing indices or creating files. Keep code blocks distinct so Gmail can emit a `pre` with literal whitespace. Reset Docs text/paragraph styles and remove inherited bullets only in the inserted range.
+2. Wrap complete slide paragraphs using conservative glyph advances, then slice the styled runs into those lines. Coalesce identical styles to bound request size. Titles use at most two lines per title page; further title text gets additional pages instead of clipping. Add per-paragraph text direction and grapheme segmentation with a fallback for runtimes lacking `Intl.Segmenter`.
+3. Persist `bmdOperation` before any remote mutation. Store a SHA-256 fingerprint, state, timestamp, and target URL when available. Mark done only after the remote response. Completed repeats reopen the saved native result; uncertain writes block until the user reviews the result and acknowledges a new operation. Gmail insertion stays uncertain because the client supplies no completion callback. Never delete or retry an uncertain result automatically.
+4. In the browser, retain safe table alignment, report sanitized elements/styles, apply automatic text direction, and only use drop caps for suitable scripts. Group the first displayed character with `Intl.Segmenter`. Report missing web fonts and require a known typeface for export. Block chart errors before capture.
+5. Keep the export dialog open and lock document/settings changes, paste, drop, and Escape while exporting. Snapshot source and filename. Compress each tile immediately, clear raw canvases in `finally`, and retain only bounded PNG blobs. Decode one tile at a time into each PDF page, releasing it immediately. Apply limits on document height, page count, source image pixels, and compressed bytes. Size image width/height explicitly instead of relying on unsupported `object-fit` rendering.
+6. Show the first actual exported image/PDF page in the dialog and explain the fixed layout. Keep the visible Save link as the reliable path when an automatic download lacks a browser user gesture.
+7. Build with `node workspace-addon/build.cjs`; run `node --test workspace-addon/test/addon.test.cjs`. Run the Playwright CLI functions in `output/playwright/failure-modes-check.cjs` and `workspace-check.cjs`; run `node output/playwright/pagination-mobile.cjs` with Playwright available through `NODE_PATH` and the local server on port 8099.
+
+### What went wrong
+The audit's identical visible-text fixture produced one plain slide and eleven styled slides while the original sixteen tests passed. New tests must assert layout behavior, not just the existence of continuation slides.
+
+The table-alignment browser test initially failed because Marked emits `align` attributes, not CSS styles. The sanitizer now converts the parser's allowlisted alignment values to safe styles. Download checks initially waited for automatic clicks; Edge generated files but blocked those clicks after asynchronous rendering. Tests now click the visible Save link after completion, exercising the intended fallback instead of depending on a browser optimization.
+
+### Verification
+All 26 native tests pass, including identical slide counts/line breaks for plain and bold text, long titles, Gmail whitespace, decoded private-use/control characters, inherited styles, RTL direction, uncertain writes, completed-repeat behavior, and preflight rejection before file creation. The bundle builds; JavaScript syntax and patch whitespace checks pass.
+
+Focused Edge checks pass for blocked web fonts, conversion notices, Arabic direction, CJK display, combining accents, joined emoji, table alignment, compressed tiles without retained canvases, export locking, portrait image proportions (85 by 850 pixels), failed-chart blocking, and canvas cleanup after forced budget overflow. The browser preview and generated PNG were visually reviewed. The original Workspace handoff/chart/PDF/PNG check passes with no page exceptions. Expected console network errors come from deliberately blocked fonts and a deliberate broken image.
+
+The existing reader regression stage passes. The mobile/pagination probe passes all twelve width/paper combinations and produces eight contiguous PDF pages and four contiguous image tiles. Downloaded artifacts are 2,702,991 bytes for PDF and 3,825,231 bytes for ZIP. These are local browser checks and simulated Google responses, not live Google host tests. Exact font fitting, real-device memory behavior, OAuth, Gmail delivery rendering, and remote interruption recovery remain live acceptance checks; the README lists them explicitly.

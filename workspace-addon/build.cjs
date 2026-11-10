@@ -3,7 +3,7 @@ const path = require('node:path');
 const root = __dirname;
 const dest = path.join(root, 'dist');
 fs.mkdirSync(dest, { recursive: true });
-for (const name of ['Markdown', 'Google', 'Addon']) {
+for (const name of ['Markdown', 'Journal', 'Google', 'Addon']) {
   fs.copyFileSync(path.join(root, 'src', name + '.js'), path.join(dest, name + '.gs'));
 }
 // UMD chooses globalThis.marked in Apps Script; keep vendor license header.

@@ -149,7 +149,7 @@
       <p id="exportTitle" class="eyebrow">Download document</p>
       <button id="exportClose" class="btn btn-icon" type="button" aria-label="Close download options">×</button>
     </div>
-    <p class="export-description">Save the rendered page with its current paper and ink. Long image exports download as numbered PNGs in a ZIP.</p>
+    <p class="export-description">Downloads use a fixed page layout with your current paper and ink, so line breaks can differ from the screen. Review the output preview below. Long image exports download as numbered PNGs in a ZIP.</p>
     <div class="export-actions">
       <button id="downloadPdfBtn" class="btn btn-solid" type="button">Download PDF</button>
       <button id="downloadImageBtn" class="btn btn-ghost" type="button">Download PNG image</button>
@@ -159,6 +159,7 @@
          finished file is also offered as a link the reader can tap. -->
     <p id="exportStatus" class="export-status" role="status" aria-live="polite" hidden></p>
     <a id="exportSaveLink" class="btn btn-solid export-save" hidden download>Save the file</a>
+    <figure id="exportPreview" hidden><img id="exportPreviewImage" alt="Exported document preview"><figcaption id="exportPreviewCaption"></figcaption></figure>
   </dialog>
 
   <!-- ============ Editor ============ -->
@@ -292,6 +293,7 @@
   <script src="js/export.js"></script>
   <script src="js/editor.js"></script>
   <script src="js/sanitize.js"></script>
+  <script src="js/typography.js"></script>
   <script src="js/app.js"></script>
 </body>
 </html>

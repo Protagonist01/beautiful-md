@@ -14,7 +14,9 @@ function runtime() {
   });
   const ctx = vm.createContext({
     console, PropertiesService: { getUserProperties: () => store(user), getScriptProperties: () => store(script) },
-    Utilities: { newBlob: text => ({ getBytes: () => Array.from(Buffer.from(text)) }), getUuid: () => '12345678-abcd-1234-abcd-123456789abc' },
+    Utilities: { newBlob: text => ({ getBytes: () => Array.from(Buffer.from(text)) }), getUuid: () => '12345678-abcd-1234-abcd-123456789abc',
+      DigestAlgorithm: { SHA_256: 'sha256' }, Charset: { UTF_8: 'utf8' },
+      computeDigest: (algorithm, value) => Array.from(require('node:crypto').createHash(algorithm).update(value).digest()) },
     LockService: { getUserLock: () => ({ tryLock: () => true, releaseLock() {} }) },
     ScriptApp: { getOAuthToken: () => 'test-token' },
     UrlFetchApp: { fetch(url, options) {
@@ -46,7 +48,7 @@ function runtime() {
   ctx.CardService.ContentType = { MUTABLE_HTML: 'html' };
   ctx.CardService.UpdateDraftBodyType = { IN_PLACE_INSERT: 'cursor' };
   vm.runInContext(fs.readFileSync(path.join(root, '../vendor/marked.min.js'), 'utf8'), ctx);
-  for (const file of ['Markdown', 'Google', 'Addon']) vm.runInContext(fs.readFileSync(path.join(root, 'src', file + '.js'), 'utf8'), ctx);
+  for (const file of ['Markdown', 'Journal', 'Google', 'Addon']) vm.runInContext(fs.readFileSync(path.join(root, 'src', file + '.js'), 'utf8'), ctx);
   return { ctx, user, script, calls, drafts, md: ctx.BmdMarkdown };
 }
 const plain = value => JSON.parse(JSON.stringify(value));
@@ -76,7 +78,7 @@ test('Docs uses UTF-16 offsets, starts appends on a fresh paragraph, and targets
   assert.deepEqual(requests[0].insertText.location, { index: 12, tabId: 'tab-1' });
   const bold = requests.find(r => r.updateTextStyle?.textStyle.bold === true).updateTextStyle;
   assert.deepEqual(bold.range, { startIndex: 16, endIndex: 20, tabId: 'tab-1' });
-  assert.equal(requests[1].updateTextStyle.textStyle.bold, false);
+  assert.equal(requests.find(r => r.updateTextStyle?.textStyle.weightedFontFamily).updateTextStyle.textStyle.bold, false);
 });
 
 test('Sheets converts tables to cells and keeps formulas as literal strings', () => {
@@ -252,4 +254,110 @@ test('manifest wires four hosts and every trigger to an existing callback', () =
   visit(manifest);
   assert.ok(manifest.oauthScopes.includes('https://www.googleapis.com/auth/drive.file'));
   assert.ok(!manifest.oauthScopes.some(scope => /mail\.google\.com|gmail\.send|gmail\.modify|gmail\.readonly/.test(scope)));
+});
+
+test('slide counts and line breaks depend on visible text, not bold spans', () => {
+  const { md } = runtime();
+  const pages = source => plain(md.slides(md.parse(source), 720, 405, 'fixture'));
+  const a = pages('a b '.repeat(60)), b = pages('a **b** '.repeat(60));
+  assert.equal(a.filter(r => r.createSlide).length, 1);
+  assert.equal(b.filter(r => r.createSlide).length, 1);
+  assert.deepEqual(a.filter(r => r.insertText).map(r => r.insertText.text), b.filter(r => r.insertText).map(r => r.insertText.text));
+  assert.ok(pages('a **b** '.repeat(240)).filter(r => r.createSlide).length < 10);
+});
+
+test('long titles split into bounded title pages without losing text', () => {
+  const { md } = runtime();
+  const title = 'W漢😀'.repeat(100);
+  const requests = md.slides(md.parse('# ' + title), 720, 405, 'title');
+  const titles = requests.filter(r => r.insertText && /_t\d+$/.test(r.insertText.objectId)).map(r => r.insertText.text);
+  assert.ok(titles.length > 1);
+  assert.equal(titles.join('').replace(/\n/g, ''), title);
+  assert.ok(titles.every(text => text.split('\n').length <= 2));
+  assert.ok(!titles.some(text => /[\ud800-\udbff]\n|\n[\udc00-\udfff]/.test(text)));
+});
+
+test('Gmail code keeps indentation, newlines, and escaped markup inside pre', () => {
+  const { md } = runtime();
+  const html = md.html(md.parse('```python\nif ready:\n    run("<tag>")\n```'));
+  assert.match(html, /^<pre dir="ltr" style="white-space:pre-wrap;/);
+  assert.match(html, /if ready:\n    run\(/);
+  assert.match(html, /&lt;tag&gt;/);
+  assert.doesNotMatch(html, /<br>/);
+});
+
+test('native Unicode validation includes decoded entities and happens before API creation', () => {
+  const { ctx, md, calls } = runtime();
+  for (const source of ['\ue000**bold**', '&#xE000;**bold**', '&#13;bold']) {
+    const blocks = md.parse(source);
+    assert.throws(() => md.docs(blocks, 1), /control or private-use/);
+    assert.throws(() => md.slides(blocks, 720, 405, 'bad'), /control or private-use/);
+    assert.match(JSON.stringify(ctx.createNative(event('docs', source))), /control or private-use/);
+  }
+  assert.equal(calls.length, 0);
+});
+
+test('Docs clears inherited direct styles and bullets only inside the inserted range', () => {
+  const { md } = runtime();
+  const requests = md.docs(md.parse('# Heading\n\nPlain'), 40, 'tab');
+  const bullets = requests.find(r => r.deleteParagraphBullets).deleteParagraphBullets;
+  assert.equal(bullets.range.startIndex, 41);
+  const baseline = requests.find(r => r.updateTextStyle?.textStyle.baselineOffset).updateTextStyle;
+  for (const field of ['foregroundColor', 'backgroundColor', 'fontSize', 'underline', 'link', 'smallCaps']) assert.ok(baseline.fields.includes(field));
+  assert.equal(baseline.textStyle.fontSize.magnitude, 11);
+  assert.ok(requests.some(r => r.updateTextStyle?.textStyle.fontSize?.magnitude === 24));
+  assert.ok(requests.find(r => r.updateParagraphStyle).updateParagraphStyle.fields.includes('indentStart'));
+});
+
+test('RTL direction is explicit in native Docs, Slides, and Gmail', () => {
+  const { md } = runtime();
+  const blocks = md.parse('مرحبا بالعالم');
+  assert.equal(md.docs(blocks, 1).find(r => r.updateParagraphStyle).updateParagraphStyle.paragraphStyle.direction, 'RIGHT_TO_LEFT');
+  assert.match(md.html(blocks), /dir="rtl"/);
+  assert.ok(md.slides(blocks, 720, 405, 'rtl').some(r => r.updateParagraphStyle?.style.direction === 'RIGHT_TO_LEFT'));
+});
+
+test('uncertain file creation is persisted before the call and blocks repeat writes', () => {
+  const { ctx, user, calls } = runtime();
+  ctx.respond = () => {
+    assert.equal(JSON.parse(user.bmdOperation).state, 'uncertain');
+    throw new Error('Lost connection after remote write');
+  };
+  ctx.createNative(event('docs'));
+  assert.match(JSON.stringify(ctx.createNative(event('docs'))), /may have completed/);
+  assert.equal(calls.length, 1);
+  assert.match(JSON.stringify(ctx.onHomepage(event('docs'))), /uncertain result/);
+});
+
+test('known target survives population failure; successful repeat reopens rather than recreates', () => {
+  const { ctx, user, calls } = runtime();
+  ctx.respond = (url, options) => {
+    if (options.method === 'post' && !url.endsWith(':batchUpdate')) return { documentId: 'created' };
+    throw new Error('Population read failed');
+  };
+  ctx.createNative(event('docs'));
+  assert.match(JSON.parse(user.bmdOperation).target, /created/);
+  ctx.BmdJournal.clear();
+  ctx.respond = (url, options) => options.method === 'get' ? { body: { content: [{ endIndex: 2 }] } } : url.endsWith(':batchUpdate') ? {} : { documentId: 'completed' };
+  ctx.createNative(event('docs'));
+  const count = calls.length;
+  const response = ctx.createNative(event('docs'));
+  assert.equal(calls.length, count);
+  assert.match(JSON.stringify(response), /completed/);
+});
+
+test('Gmail repeated draft creation and uncertain compose insertion are guarded', () => {
+  const { ctx, drafts } = runtime();
+  ctx.createGmailDraft(event('gmail'));
+  assert.throws(() => ctx.createGmailDraft(event('gmail')), /already created/);
+  assert.equal(drafts.length, 1);
+  ctx.insertGmailBody(event('gmail'));
+  assert.throws(() => ctx.insertGmailBody(event('gmail')), /may have completed/);
+});
+
+test('excessive slide content is rejected before creating an empty file', () => {
+  const { ctx, calls } = runtime();
+  const source = Array.from({ length: 41 }, (_, i) => '# Section ' + i).join('\n\n');
+  assert.match(JSON.stringify(ctx.createNative(event('slides', source))), /40 slides/);
+  assert.equal(calls.length, 0);
 });

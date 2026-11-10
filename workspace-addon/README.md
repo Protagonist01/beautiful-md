@@ -8,7 +8,7 @@ One Apps Script project uses CardService for all four hosts. Markdown is convert
 
 Google Workspace add-ons cannot embed the existing HTML reader in their card sidebar or access the editor cursor. Insertion therefore appends to the first Docs tab, adds a new worksheet in Sheets, appends slides, or inserts at the Gmail compose cursor. Existing editor content is preserved.
 
-Native output supports headings, paragraphs, emphasis, links, code, and lists. Sheets places Markdown tables into cells. Docs and Slides render tables as tab-separated text. Images appear as descriptive text in native output; charts and diagrams remain source code there. Use styled preview/export for full visual fidelity. Slides splits long sections into continuation slides; review layout after conversion.
+Native output supports headings, paragraphs, emphasis, links, code, and list markers. Sheets places Markdown tables into cells. Docs and Slides render tables as tab-separated text. Images appear as descriptive text in native output; charts and diagrams remain source code there. Use styled preview/export for full visual fidelity. Slides wraps whole paragraphs independently of formatting spans and splits long titles and body content across pages. Apps Script has no font measurement API: the layout uses conservative glyph-width estimates, not measured Google font metrics. Review layout after conversion, especially with fallback fonts or mixed scripts.
 
 ## Build and test
 
@@ -40,7 +40,19 @@ Optional clasp workflow: install/authenticate Google's clasp CLI yourself, then 
 - `gmail.addons.execute`: run in Gmail.
 - `gmail.addons.current.action.compose`: create a draft or update the current compose body following the user's action. No message-reading or send action is implemented.
 
-The last Markdown input and title are stored in per-user Apps Script properties (up to 7,000 UTF-8 bytes for Markdown). **Clear saved input** removes them. Google APIs receive the content when the user creates/inserts it. Errors are shown without logging content or OAuth tokens. A failed request is not retried automatically: inspect the target before retrying because a new empty file may have been created.
+The last Markdown input and title are stored in per-user Apps Script properties (up to 7,000 UTF-8 bytes for Markdown). **Clear saved input** removes them. Google APIs receive the content when the user creates/inserts it. Errors are shown without logging content or OAuth tokens.
+
+## Failure protection and recovery
+
+- Native conversion rejects control/private-use characters that Google removes, including characters produced by decoding HTML entities. Rejection happens before calculating style positions or creating files. Styled browser preview remains available for the original source.
+- Docs insertion resets text size, font, color, decoration, paragraph spacing/indentation, and inherited bullets in the new content. Existing content is not restyled. Gmail fenced code uses preformatted whitespace; RTL content receives explicit direction.
+- Before a remote mutation, an operation record is saved per user with a content fingerprint and target link when known. A repeated completed native operation reopens its previous result. An uncertain operation blocks further writes, including different input, until reviewed. This covers timeouts, lost responses, revoked permissions, and quota failures; it does not claim the remote write failed.
+- Reopen the add-on, choose **Review last result**, and inspect the file or Gmail Drafts. If no target link was received, search recent files by title. Then use **I checked the result — allow a new operation** only when it is safe to create/insert again. Empty files are preserved for review, not automatically deleted.
+- Gmail does not report whether a returned compose-insertion response was applied. After insertion, review the email before acknowledging the operation and inserting again. No sending is implemented.
+- Export holds content/settings stable and blocks failed charts. Missing web fonts produce a notice and block export until an installed typeface is selected. Sanitization notices report simplified content; safe table alignment is preserved. RTL text and complete displayed-character drop caps are supported in the browser.
+- The download dialog shows the first actual exported image/PDF page. Fixed export typography and line breaks can differ from the responsive reader. Review the downloaded file for every page.
+- Export tiles are compressed immediately and raw canvases cleared, including error paths. At most one tile is decoded at a time when assembling PDF pages. Limits: 200 pages, 200,000 CSS pixels of document height, 16 million pixels per source image, and 32 MB total compressed tile data. These bounds reduce memory risk; actual low-memory devices can still fail. Split documents if necessary.
+- A visible Save link is the reliable fallback when a browser blocks automatic downloads. The automatic click is best effort.
 
 ## Manual acceptance checks (requires Google account)
 
@@ -52,6 +64,11 @@ The last Markdown input and title are stored in per-user Apps Script properties 
 - Open styled preview, change paper, render charts, and export PDF plus PNG/ZIP. Confirm source survives the handoff.
 - Deny file access, omit preview URL, provide blank/oversized input, and revoke OAuth. Confirm understandable errors and no false success.
 - Clear saved input and reopen the add-on; verify Markdown and title are gone.
+- Append after colored/oversized/bulleted Docs text; verify the new content uses its own baseline and the old text stays unchanged.
+- Interrupt a native create/insert request; verify repeating it cannot write again until the result is reviewed. Verify completed repeats reopen the existing target.
+- Convert long titles, many short bold spans, Arabic/Hebrew, CJK, combining accents, joined emoji, and private-use characters. Verify layout, whitespace, rejection messages, and file contents in each real host.
+
+Local regression coverage: `workspace-addon/test/addon.test.cjs` (26 tests), `output/playwright/failure-modes-check.cjs` (Playwright CLI function), `output/playwright/workspace-check.cjs` (Playwright CLI function), and `output/playwright/pagination-mobile.cjs` (standalone Node browser probe). Live Google integration, Gmail delivery rendering, real-device memory limits, and exact Google font fitting remain manual checks.
 
 ## Google references
 

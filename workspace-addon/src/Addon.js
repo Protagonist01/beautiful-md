@@ -26,11 +26,15 @@ function bmdAction(name, params) {
 function bmdNotice(message) {
   return CardService.newActionResponseBuilder().setNotification(CardService.newNotification().setText(message)).build();
 }
-function bmdRun(fn) {
+function bmdRun(fn, event) {
   var lock = LockService.getUserLock();
   if (!lock.tryLock(1000)) return bmdNotice('Another action is still running. Please wait.');
   try { return fn(); }
-  catch (error) { return bmdNotice(error.message || 'The action failed. Check your access and try again.'); }
+  catch (error) {
+    var response = CardService.newActionResponseBuilder().setNotification(CardService.newNotification().setText(error.message || 'The action failed. Check your access and try again.'));
+    if (event) response.setNavigation(CardService.newNavigation().updateCard(bmdCard(event, false)));
+    return response.build();
+  }
   finally { lock.releaseLock(); }
 }
 function onHomepage(e) { return bmdCard(e, false); }
@@ -55,8 +59,14 @@ function bmdCard(e, compose) {
     } else section.addWidget(CardService.newTextButton().setText('Allow access to this file').setOnClickAction(bmdAction('requestEditorAccess')));
   }
   section.addWidget(CardService.newTextButton().setText('Open styled preview & exports').setOnClickAction(bmdAction('openStyledPreview')))
-    .addWidget(CardService.newTextParagraph().setText('Native output preserves editable text and basic formatting. Paper textures, charts, and image exports are available in the browser preview.'))
+    .addWidget(CardService.newTextParagraph().setText('Native conversion: images become descriptions; charts remain source code; Docs and Slides tables become tab-separated text; custom HTML becomes literal text. Use browser preview for full styling. Slides use conservative font estimates; review layout in Google.'))
     .addWidget(CardService.newTextButton().setText('Clear saved input').setOnClickAction(bmdAction('clearSavedInput', { compose: compose ? 'true' : 'false' })));
+  var last = BmdJournal.read();
+  if (last) {
+    section.addWidget(CardService.newTextParagraph().setText(last.state === 'done' ? 'The last operation completed. Repeating the same input reopens its result.' : 'The last write has an uncertain result. Check the target or search recent files/drafts before starting another.'));
+    if (last.target) section.addWidget(CardService.newTextButton().setText('Review last result').setOnClickAction(bmdAction('reviewLastResult')));
+    section.addWidget(CardService.newTextButton().setText('I checked the result — allow a new operation').setOnClickAction(bmdAction('acknowledgeOperation', { compose: compose ? 'true' : 'false' })));
+  }
   return CardService.newCardBuilder().setHeader(CardService.newCardHeader().setTitle('Beautiful MD').setSubtitle(labels[host])).addSection(section).build();
 }
 function requestEditorAccess(e) {
@@ -72,8 +82,9 @@ function bmdNative(e, insert) {
     var url = BmdGoogle.convert(bmdHost(e), input.title, input.blocks, e, insert);
     return CardService.newActionResponseBuilder()
       .setNotification(CardService.newNotification().setText(insert ? 'Content inserted.' : 'File created.'))
+      .setNavigation(CardService.newNavigation().updateCard(bmdCard(e, false)))
       .setOpenLink(CardService.newOpenLink().setUrl(url)).build();
-  });
+  }, e);
 }
 function createNative(e) { return bmdNative(e, false); }
 function insertNative(e) { return bmdNative(e, true); }
@@ -92,18 +103,40 @@ function createGmailDraft(e) {
   if (!lock.tryLock(1000)) throw new Error('Another action is still running. Please wait.');
   try {
     var input = bmdInput(e);
+    BmdMarkdown.validateNative(input.blocks);
+    var operation = BmdJournal.begin(['gmail-create', input.title, input.blocks], 'https://mail.google.com/mail/u/0/#drafts');
+    if (operation.state === 'done') throw new Error('This draft was already created. Open Gmail Drafts to review it.');
     var text = BmdMarkdown.paragraphs(input.blocks).map(function (b) { return BmdMarkdown.plain(b.runs); }).join('\n');
     var draft = GmailApp.createDraft('', input.title, text, { htmlBody: BmdMarkdown.html(input.blocks) });
+    BmdJournal.done(operation, 'https://mail.google.com/mail/u/0/#drafts');
     return CardService.newComposeActionResponseBuilder().setGmailDraft(draft).build();
   } finally { lock.releaseLock(); }
 }
 function insertGmailBody(e) {
   // Gmail expects an UpdateDraftActionResponse, not a generic ActionResponse.
+  var lock = LockService.getUserLock();
+  if (!lock.tryLock(1000)) throw new Error('Another action is still running. Please wait.');
+  try {
   var input = bmdInput(e);
+  BmdMarkdown.validateNative(input.blocks);
+  BmdJournal.begin(['gmail-insert', input.blocks], 'https://mail.google.com/mail/u/0/#drafts');
   var body = CardService.newUpdateDraftBodyAction()
     .addUpdateContent(BmdMarkdown.html(input.blocks), CardService.ContentType.MUTABLE_HTML)
     .setUpdateType(CardService.UpdateDraftBodyType.IN_PLACE_INSERT);
   return CardService.newUpdateDraftActionResponseBuilder().setUpdateDraftBodyAction(body).build();
+  } finally { lock.releaseLock(); }
+}
+function reviewLastResult() {
+  var last = BmdJournal.read();
+  if (!last || !last.target) return bmdNotice('Search your recent files or Gmail Drafts before allowing a new operation.');
+  return CardService.newActionResponseBuilder().setOpenLink(CardService.newOpenLink().setUrl(last.target)).build();
+}
+function acknowledgeOperation(e) {
+  return bmdRun(function () {
+    BmdJournal.clear();
+    var compose = e.commonEventObject.parameters && e.commonEventObject.parameters.compose === 'true';
+    return CardService.newActionResponseBuilder().setNavigation(CardService.newNavigation().updateCard(bmdCard(e, compose))).build();
+  });
 }
 function clearSavedInput(e) {
   var props = PropertiesService.getUserProperties();
