@@ -73,17 +73,20 @@ var BmdMarkdown = (function () {
   function parse(source) {
     if (typeof source !== 'string' || !source.trim()) throw new Error('Paste some Markdown first.');
     if (source.length > 30000) throw new Error('This document is too large for the add-on.');
-    var blocks = [];
-    function visit(tokens, prefix) {
+    function visit(tokens) {
+      var blocks = [];
       (tokens || []).forEach(function (t) {
         if (t.type === 'space' || t.type === 'def') return;
-        if (t.type === 'blockquote') { visit(t.tokens, '> '); return; }
+        if (t.type === 'blockquote') {
+          var children = visit(t.tokens);
+          if (children.length) blocks.push({ type: 'quote', children: children });
+          return;
+        }
         if (t.type === 'list') {
-          t.items.forEach(function (item, i) {
-            var marker = t.ordered ? String(Number(t.start) + i) + '. ' : '• ';
-            if (item.task) marker = item.checked ? '☑ ' : '☐ ';
-            visit(item.tokens, (prefix || '') + marker);
-          });
+          blocks.push({ type: 'list', ordered: t.ordered, start: t.ordered ? Number(t.start) : 1,
+            items: t.items.map(function (item) {
+              return { task: Boolean(item.task), checked: Boolean(item.checked), children: visit(item.tokens) };
+            }) });
           return;
         }
         if (t.type === 'table') {
@@ -98,7 +101,6 @@ var BmdMarkdown = (function () {
         else if (t.type === 'html') runs = [{ text: t.raw.trimEnd(), style: {} }];
         else if (t.type === 'hr') runs = [{ text: '────────', style: {} }];
         else runs = inline(t.tokens || [{ type: 'text', text: t.text || t.raw || '' }]);
-        if (prefix) runs.unshift({ text: prefix, style: {} });
         var block = { type: t.type === 'heading' ? 'heading' : t.type === 'code' ? 'code' : 'paragraph', depth: t.depth || 0, runs: runs };
         if (t.type === 'code' && /^(chart|chartjs)$/i.test((t.lang || '').trim())) {
           try { block.chart = JSON.parse(t.text, function (key, value) {
@@ -107,22 +109,60 @@ var BmdMarkdown = (function () {
         }
         blocks.push(block);
       });
+      return blocks;
     }
-    visit(marked.lexer(source, { gfm: true }));
+    var blocks = visit(marked.lexer(source, { gfm: true }));
     if (!blocks.length) throw new Error('The Markdown contains no visible content.');
     return blocks;
   }
-  function paragraphs(blocks) {
+
+  // Keep containers for Gmail. Editors that write paragraphs or rows use one
+  // marker per item, with a separate depth for indentation.
+  function linearBlocks(blocks, listDepth, quoteDepth) {
+    listDepth = listDepth || 0;
+    quoteDepth = quoteDepth || 0;
+    var indent = Math.max(0, listDepth - 1) + quoteDepth;
+    return blocks.flatMap(function (block) {
+      if (block.type === 'quote') return linearBlocks(block.children, listDepth, quoteDepth + 1);
+      if (block.type === 'list') {
+        return block.items.flatMap(function (item, index) {
+          var marker = item.task ? (item.checked ? '☑ ' : '☐ ') :
+            block.ordered ? String(block.start + index) + '. ' : '• ';
+          var lines = linearBlocks(item.children, listDepth + 1, quoteDepth);
+          var first = lines[0];
+          var itemIndent = listDepth + quoteDepth;
+          if (first && first.runs && !first.marker && first.indent === itemIndent) {
+            lines[0] = Object.assign({}, first, { marker: marker });
+          } else {
+            lines.unshift({ type: 'paragraph', runs: [], marker: marker, indent: itemIndent, quoteDepth: quoteDepth });
+          }
+          return lines;
+        });
+      }
+      return listDepth || quoteDepth ? Object.assign({}, block, { indent: indent, quoteDepth: quoteDepth }) : block;
+    });
+  }
+  function markedRuns(block, spaces) {
+    var prefix = ' '.repeat((block.indent || 0) * spaces) + '> '.repeat(block.quoteDepth || 0) + (block.marker || '');
+    return prefix ? [{ text: prefix, style: {} }].concat(block.runs) : block.runs;
+  }
+  function paragraphs(blocks, spaces) {
     var result = [];
-    blocks.forEach(function (b) {
-      if (b.type !== 'table') { result.push(b); return; }
+    if (spaces === undefined) spaces = 2;
+    linearBlocks(blocks).forEach(function (b) {
+      if (b.type !== 'table') {
+        result.push(Object.assign({}, b, { runs: markedRuns(b, spaces) }));
+        return;
+      }
       b.rows.forEach(function (cells) {
         var runs = [];
         cells.forEach(function (cell, i) {
           if (i) runs.push({ text: '\t', style: {} });
           runs = runs.concat(cell);
         });
-        result.push({ type: 'paragraph', depth: 0, runs: runs });
+        var row = Object.assign({}, b, { type: 'paragraph', depth: 0, runs: runs });
+        row.runs = markedRuns(row, spaces);
+        result.push(row);
       });
     });
     return result;
@@ -141,6 +181,15 @@ var BmdMarkdown = (function () {
       }).join('');
     }
     return blocks.map(function (b) {
+      if (b.type === 'quote') return '<blockquote>' + html(b.children) + '</blockquote>';
+      if (b.type === 'list') {
+        var listTag = b.ordered ? 'ol' : 'ul';
+        var start = b.ordered && b.start !== 1 ? ' start="' + b.start + '"' : '';
+        return '<' + listTag + start + '>' + b.items.map(function (item) {
+          var task = item.task ? (item.checked ? '☑ ' : '☐ ') : '';
+          return '<li>' + task + html(item.children) + '</li>';
+        }).join('') + '</' + listTag + '>';
+      }
       if (b.type === 'code') return '<pre dir="ltr" style="white-space:pre-wrap;overflow-wrap:anywhere;font-family:monospace"><code>' + escape(plain(b.runs)) + '</code></pre>';
       if (b.type === 'table') return '<table border="1" cellpadding="6" cellspacing="0">' + b.rows.map(function (row, i) {
         var tag = i ? 'td' : 'th';
@@ -164,7 +213,7 @@ var BmdMarkdown = (function () {
   function docs(blocks, start, tabId, separator, imageWidth) {
     validateNative(blocks);
     var needsSeparator = separator !== false && start > 1;
-    var all = paragraphs(blocks), text = needsSeparator ? '\n' : '', formats = [], images = [];
+    var all = paragraphs(blocks, 0), text = needsSeparator ? '\n' : '', formats = [], images = [];
     all.forEach(function (b) {
       var begin = start + text.length;
       b.runs.forEach(function (r) {
@@ -183,7 +232,8 @@ var BmdMarkdown = (function () {
         paragraphStyle: { namedStyleType: b.type === 'heading' ? 'HEADING_' + b.depth : 'NORMAL_TEXT',
           direction: b.type === 'code' ? 'LEFT_TO_RIGHT' : direction(plain(b.runs)),
           alignment: 'START', lineSpacing: 115, spaceAbove: { magnitude: 0, unit: 'PT' }, spaceBelow: { magnitude: 8, unit: 'PT' },
-          indentStart: { magnitude: 0, unit: 'PT' }, indentEnd: { magnitude: 0, unit: 'PT' }, indentFirstLine: { magnitude: 0, unit: 'PT' } },
+          indentStart: { magnitude: (b.indent || 0) * 14, unit: 'PT' }, indentEnd: { magnitude: 0, unit: 'PT' },
+          indentFirstLine: { magnitude: (b.indent || 0) * 14, unit: 'PT' } },
         fields: 'namedStyleType,direction,alignment,lineSpacing,spaceAbove,spaceBelow,indentStart,indentEnd,indentFirstLine,tabStops,shading,keepWithNext,avoidWidowAndOrphan'
       } });
       if (b.type === 'heading') formats.push({ updateTextStyle: {
@@ -208,12 +258,18 @@ var BmdMarkdown = (function () {
   function sheets(blocks, sheetId) {
     validateNative(blocks);
     var rows = [], imageRows = [], charts = [];
-    blocks.forEach(function (b) {
-      if (b.chart) {
-        var config = b.chart, labels = config.data && config.data.labels, datasets = config.data && config.data.datasets;
-        if (!['bar', 'line', 'pie', 'doughnut'].includes(config.type) || !Array.isArray(labels) || !Array.isArray(datasets) || !datasets.length || datasets.length > 8 || labels.length > 200) throw new Error('Native Sheets charts support bar, line, pie, and doughnut with up to 8 datasets and 200 labels. Use styled preview for other chart types.');
+    linearBlocks(blocks).forEach(function (b) {
+      if (b.chart !== undefined) {
+        var config = b.chart || {};
+        var labels = config.data && config.data.labels, datasets = config.data && config.data.datasets;
+        if (!['bar', 'line', 'pie', 'doughnut'].includes(config.type) || !Array.isArray(labels) || !labels.length || !Array.isArray(datasets) || !datasets.length || datasets.length > 8 || labels.length > 200) throw new Error('Native Sheets charts support bar, line, pie, and doughnut with 1 to 8 datasets and 1 to 200 labels. Use styled preview for other chart types.');
         if (['pie', 'doughnut'].includes(config.type) && datasets.length !== 1) throw new Error('Native pie/doughnut charts need one dataset.');
-        var start = rows.length, columns = datasets.length + 1;
+        datasets.forEach(function (dataset, index) {
+          if (!dataset || !Array.isArray(dataset.data) || dataset.data.length !== labels.length) {
+            throw new Error('Chart series ' + (index + 1) + ' must have exactly ' + labels.length + ' values, one per label.');
+          }
+        });
+        var start = rows.length;
         var table = [[{ userEnteredValue: { stringValue: 'Label' } }].concat(datasets.map(function (set, i) { return { userEnteredValue: { stringValue: String(set.label || 'Series ' + (i + 1)) } }; }))];
         labels.forEach(function (label, ri) {
           if (typeof label !== 'string' && typeof label !== 'number') throw new Error('Chart labels must be text or numbers.');
@@ -238,10 +294,10 @@ var BmdMarkdown = (function () {
         else spec.basicChart = { chartType: config.type === 'line' ? 'LINE' : config.options && config.options.indexAxis === 'y' ? 'BAR' : 'COLUMN',
           headerCount: 1, legendPosition: 'BOTTOM_LEGEND', domains: [{ domain: source(0) }],
           series: datasets.map(function (_, i) { return { series: source(i + 1), targetAxis: config.options && config.options.indexAxis === 'y' ? 'BOTTOM_AXIS' : 'LEFT_AXIS' }; }) };
-        charts.push({ addChart: { chart: { spec: spec, position: { overlayPosition: { anchorCell: { sheetId: sheetId, rowIndex: start, columnIndex: columns + 1 }, widthPixels: 600, heightPixels: 360 } } } } });
+        charts.push(spec);
         return;
       }
-      var sourceRows = b.type === 'table' ? b.rows : [[b.runs]];
+      var sourceRows = b.type === 'table' ? b.rows : [[markedRuns(b, 2)]];
       sourceRows.forEach(function (cells, ri) {
         var values = cells.map(function (runs, ci) {
           var cell = { userEnteredValue: { stringValue: plain(runs) }, userEnteredFormat: { wrapStrategy: 'WRAP' } };
@@ -266,9 +322,17 @@ var BmdMarkdown = (function () {
         rows.push({ values: values });
       });
     });
+    var dataColumns = rows.reduce(function (width, row) { return Math.max(width, row.values.length); }, 1);
+    var chartHeight = 360;
+    var chartRequests = charts.map(function (spec, index) {
+      return { addChart: { chart: { spec: spec, position: { overlayPosition: {
+        anchorCell: { sheetId: sheetId, rowIndex: 0, columnIndex: dataColumns + 1 },
+        offsetYPixels: index * (chartHeight + 24), widthPixels: 600, heightPixels: chartHeight
+      } } } } };
+    });
     return [{ updateCells: { start: { sheetId: sheetId, rowIndex: 0, columnIndex: 0 }, rows: rows, fields: 'userEnteredValue,userEnteredFormat,textFormatRuns,note' } }].concat(imageRows.map(function (index) {
       return { updateDimensionProperties: { range: { sheetId: sheetId, dimension: 'ROWS', startIndex: index, endIndex: index + 1 }, properties: { pixelSize: 180 }, fields: 'pixelSize' } };
-    }), charts);
+    }), chartRequests);
   }
   function slides(blocks, pageWidth, pageHeight, prefix) {
     validateNative(blocks);
@@ -302,7 +366,7 @@ var BmdMarkdown = (function () {
     }
     var maxLines = Math.max(1, Math.floor((pageHeight - 146) / 24));
     function page(title) { current = { title: title || 'Beautiful MD', runs: [], lines: 0 }; pages.push(current); }
-    blocks.forEach(function (b) {
+    linearBlocks(blocks).forEach(function (b) {
       if (b.type === 'table') {
         var tableImages = b.rows.flatMap(function (row) { return row.flatMap(function (runs) { return runs.filter(function (run) { return run.image; }); }); });
         var columns = b.rows[0].length, maxColumns = Math.max(1, Math.floor((pageWidth - 72) / 120));
@@ -327,7 +391,7 @@ var BmdMarkdown = (function () {
         tableImages.forEach(function (run) { page(run.image.alt); current.image = run.image; });
         current = null; return;
       }
-      if (b.type === 'heading' && b.depth <= 2) {
+      if (b.type === 'heading' && b.depth <= 2 && !b.indent && !b.marker) {
         var titles = wrap([{ text: plain(b.runs), style: { bold: true } }], 28);
         for (var i = 0; i < titles.length; i += 2) page(titles.slice(i, i + 2).map(plain).join('\n'));
         return;
@@ -341,12 +405,13 @@ var BmdMarkdown = (function () {
         });
         current = null;
       }
-      var textRuns = b.runs.filter(function (run) { return !run.image; });
+      var textRuns = markedRuns(b, 0).filter(function (run) { return !run.image; });
       if (!textRuns.length) return;
       if (!current) page('Beautiful MD');
-      wrap(textRuns, 16).forEach(function (line) {
+      var indent = Math.min((b.indent || 0) * 14, (pageWidth - 96) / 2);
+      wrap(textRuns, 16, pageWidth - 96 - indent).forEach(function (line) {
         if (current.lines >= maxLines) page(current.title);
-        current.runs = current.runs.concat(line, [{ text: '\n', style: {} }]);
+        current.runs = current.runs.concat(line, [{ text: '\n', style: {}, indent: indent }]);
         current.lines++;
       });
     });
@@ -369,11 +434,13 @@ var BmdMarkdown = (function () {
           style: { direction: direction(content), alignment: 'START', lineSpacing: 100,
             spaceAbove: { magnitude: 0, unit: 'PT' }, spaceBelow: { magnitude: 0, unit: 'PT' } }, fields: 'direction,alignment,lineSpacing,spaceAbove,spaceBelow' } });
         var paragraphOffset = 0;
-        content.split('\n').forEach(function (line) {
+        var indents = box.runs.filter(function (run) { return run.indent !== undefined; });
+        content.split('\n').forEach(function (line, i) {
           var end = Math.min(content.length, paragraphOffset + line.length + 1);
+          var lineIndent = { magnitude: indents[i] ? indents[i].indent : 0, unit: 'PT' };
           if (end > paragraphOffset) requests.push({ updateParagraphStyle: { objectId: box.id,
             textRange: { type: 'FIXED_RANGE', startIndex: paragraphOffset, endIndex: end },
-            style: { direction: direction(line) }, fields: 'direction' } });
+            style: { direction: direction(line), indentStart: lineIndent, indentFirstLine: lineIndent }, fields: 'direction,indentStart,indentFirstLine' } });
           paragraphOffset = end;
         });
         var offset = 0;
@@ -419,5 +486,5 @@ var BmdMarkdown = (function () {
     });
     return requests;
   }
-  return { parse: parse, html: html, plain: plain, paragraphs: paragraphs, docs: docs, sheets: sheets, slides: slides, escape: escape, safeLink: safeLink, validateNative: validateNative };
+  return { parse: parse, html: html, plain: plain, paragraphs: paragraphs, linearBlocks: linearBlocks, docs: docs, sheets: sheets, slides: slides, escape: escape, safeLink: safeLink, validateNative: validateNative };
 })();

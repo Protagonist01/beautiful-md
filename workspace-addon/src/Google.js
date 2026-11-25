@@ -42,6 +42,7 @@ var BmdGoogle = (function () {
     var target = docTarget(doc);
     var style = doc.documentStyle || {};
     var imageWidth = Math.max(36, Math.min(420, (style.pageSize && style.pageSize.width && style.pageSize.width.magnitude || 612) - (style.marginLeft && style.marginLeft.magnitude || 72) - (style.marginRight && style.marginRight.magnitude || 72)));
+    blocks = BmdMarkdown.linearBlocks(blocks);
     var hasTables = blocks.some(function (block) { return block.type === 'table'; });
     var requests = hasTables ? blocks.slice().reverse().flatMap(function (block) {
       if (block.type === 'table') return [{ insertTable: { rows: block.rows.length, columns: block.rows[0].length,
@@ -98,8 +99,18 @@ var BmdGoogle = (function () {
     var rows = writes[0].updateCells.rows;
     var columns = rows.reduce(function (n, r) { return Math.max(n, r.values.length); }, 1);
     if (rows.length > 1000 || columns > 100) throw new Error('Use at most 1,000 rows and 100 columns per conversion.');
-    if (requests.length) requests[0].addSheet.properties.gridProperties = { rowCount: Math.max(1000, rows.length), columnCount: Math.max(26, columns) };
-    else requests.push({ updateSheetProperties: { properties: { sheetId: sheetId, gridProperties: { rowCount: Math.max(1000, rows.length), columnCount: Math.max(26, columns) } }, fields: 'gridProperties.rowCount,gridProperties.columnCount' } });
+    var rowCount = Math.max(1000, rows.length);
+    var columnCount = Math.max(26, columns);
+    writes.forEach(function (request) {
+      if (!request.addChart) return;
+      var chart = request.addChart.chart.position.overlayPosition;
+      // Leave grid space for the chart area as well as its anchor cell.
+      rowCount = Math.max(rowCount, Math.ceil((chart.offsetYPixels + chart.heightPixels) / 20) + 1);
+      columnCount = Math.max(columnCount, chart.anchorCell.columnIndex + Math.ceil(chart.widthPixels / 100) + 1);
+    });
+    var grid = { rowCount: rowCount, columnCount: columnCount };
+    if (requests.length) requests[0].addSheet.properties.gridProperties = grid;
+    else requests.push({ updateSheetProperties: { properties: { sheetId: sheetId, gridProperties: grid }, fields: 'gridProperties.rowCount,gridProperties.columnCount' } });
     requests = requests.concat(writes);
     requests.push({ updateDimensionProperties: {
       range: { sheetId: sheetId, dimension: 'COLUMNS', startIndex: 0, endIndex: columns },
@@ -127,7 +138,7 @@ var BmdGoogle = (function () {
   function convert(host, title, blocks, event, insert) {
     if (!endpoints[host]) throw new Error('Open this action in Docs, Sheets, or Slides.');
     BmdMarkdown.validateNative(blocks);
-    if (blocks.some(function (block) { return block.type === 'table' && (block.rows.length > 200 || block.rows[0].length > 20 || block.rows.length * block.rows[0].length > 1000); })) throw new Error('Native tables are limited to 200 rows, 20 columns, and 1,000 cells. Split large tables first.');
+    if (BmdMarkdown.linearBlocks(blocks).some(function (block) { return block.type === 'table' && (block.rows.length > 200 || block.rows[0].length > 20 || block.rows.length * block.rows[0].length > 1000); })) throw new Error('Native tables are limited to 200 rows, 20 columns, and 1,000 cells. Split large tables first.');
     // Catch deterministic content failures before creating an empty file.
     if (host === 'slides' && !insert) BmdMarkdown.slides(blocks, 720, 405, 'preflight');
     if (host === 'sheets') {

@@ -15,6 +15,7 @@ A journal of the real reasoning behind this build: decisions, options rejected, 
 - [Entry 11 — Keep the preview handoff private and inert](#entry-11--keep-the-preview-handoff-private-and-inert)
 - [Entry 12 — Make layout and export failures explicit](#entry-12--make-layout-and-export-failures-explicit)
 - [Entry 13 — Recover safely and preserve document semantics](#entry-13--recover-safely-and-preserve-document-semantics)
+- [Entry 14 — Preserve drafts and document structure](#entry-14--preserve-drafts-and-document-structure)
 
 ## Entry 1 — Keep paper stock and lighting separate
 **Files touched:** `css/style.css`, `js/app.js`, `index.html`
@@ -414,3 +415,40 @@ The first Firefox matrix attempt used a synthetic clipboard event that did not l
 All 35 native/browser primitive tests pass. Six browser-engine/width combinations pass layout, RTL, semantic output, abort handling, UI cancellation, valid image hydration, and oversized image rejection. The generated PDF has searchable sentences, CJK text, an outline, MarkInfo, and `/H1`, `/Table`, `/TH`, `/TD` roles; its rendered page was visually inspected. Tags are not a claim of independent PDF/UA certification.
 
 The add-on bundle builds, including optional preview-URL configuration. Source syntax and patch checks pass. Setup instructions are in `SETUP_GOOGLE_WORKSPACE.md`; `RELEASE_CHECKLIST.md` records the remaining live-host and physical-device acceptance. Native Google font fitting remains estimated, private images are not automatically made public, and charts in hosts other than Sheets remain source text with full visuals available in the browser. Those platform boundaries are explicit rather than reported as closed by local tests.
+
+## Entry 14 — Preserve drafts and document structure
+
+**Files touched:** `js/app.js`, `js/editor.js`, `js/print.js`, Workspace Markdown and Google adapters, browser and add-on tests
+
+### Context
+
+The audit reproduced draft promotion on reload, lost last input, ID collisions and ASCII-only headings, graph paper missing from standalone HTML, truncated chart series, and flattened nested lists and quotes. It also found that Sheets chart positions depend on the number of data rows. The draft fix supersedes the single-source session format described in Entry 8.
+
+### Before you read on
+
+What information must survive independently so Cancel still means discard when a browser restores an open editor?
+
+### Options considered
+
+- Keep one source field and debounce saves. This cannot recover the original document after replacing it with the draft, and a refresh can beat the timer.
+- Keep the committed document and draft in one record, write the draft on input, and restore the editor with the committed source as its comparison baseline. One record keeps the draft and its original together.
+- Keep the current flat Markdown model and repair its list prefixes. This would still prevent Gmail from producing nested HTML. Store list and quote containers in the parsed model and project them to each destination.
+
+### Why
+
+The browser needs separate saved and editing states. The conversion model likewise needs the nesting information before each host chooses how to format it. Chart values must be validated before any Google write, and chart positions need a pixel gap independent of dataset length.
+
+### How to build it
+
+1. Write the reader source and filename with an optional draft object to the existing session key. On reload, render the reader source first, then open the editor on the draft without replacing the original. Save input immediately and retain a migration path for records with only an editing flag.
+2. Compute logical Unicode heading IDs before checking them against page IDs. Rewrite authored fragment links through that mapping and scope previews separately from the reader. Include paper and theme attributes in the exported root so the existing sheet styles apply.
+3. Preserve list order, starting number, task state, and quote children during parsing. Render nested elements in Gmail and carry marker and indentation information into the linear Google output.
+4. Validate the length of every series before building chart rows. Position each chart using a common anchor beside the widest data block and a vertical offset based on chart height plus a gap.
+
+### What went wrong
+
+The original browser tests verified that a draft reopens, but did not exercise Cancel after recovery or a reload before the save timer fired. The chart test covered a single valid series only. Add regression checks for both boundaries.
+
+### Verification
+
+All 38 unit tests passed. The new Workspace tests check each series length before any API request, compare consecutive chart positions and source ranges, and verify nested list and quote output across all four hosts. Chromium, Firefox, and WebKit passed at 375px and 1280px. The browser test checks same-event persistence, Cancel after reload, unique Unicode heading targets, and the graph background in standalone HTML under both screen and print media. A separate Chromium check recovered an older session and confirmed that opening a shared link once does not replace its draft on reload. The Apps Script bundle built. Live Google chart layout and formatting still require a test deployment.

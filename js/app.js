@@ -227,8 +227,8 @@
   }
 
   function slugify(text) {
-    return text.toLowerCase().trim()
-      .replace(/[^\w\s-]/g, "")
+    return text.normalize("NFC").toLowerCase().trim()
+      .replace(/[^\p{L}\p{M}\p{N}_\s-]/gu, "")
       .replace(/\s+/g, "-")
       .replace(/-+/g, "-") || "section";
   }
@@ -247,14 +247,11 @@
 
   /* ---------------- session restore ---------------- */
 
-  /* Mobile browsers discard tabs freely and reload them to a blank slate.
-     Keeping the document in sessionStorage means a reload puts the reader
-     back exactly where it was — and `editing` brings back an unfinished
-     edit rather than the last rendered version of it. */
-  function saveSession(source, fileName, editing) {
+  /* Keep the reader and editor sources together so a restored draft can still be discarded. */
+  function saveSession(draft = null) {
     try {
       sessionStorage.setItem("bmd-doc", JSON.stringify({
-        source: source, fileName: fileName, editing: !!editing
+        source: currentSource, fileName: currentFileName, draft
       }));
     } catch (e) { /* private mode */ }
   }
@@ -302,7 +299,7 @@
     window.bmdImages.release(article);
     currentFileName = fileName || "document";
     currentSource = source;
-    saveSession(source, fileName, false);
+    saveSession();
 
     article.innerHTML = toHTML(source);
     window.bmdImages.hydrate(article).then(schedulePaperAlignment);
@@ -356,15 +353,12 @@
     window.bmdImages.hydrate(target);
     const safely = (step) => { try { step(); } catch (err) { /* keep the rest */ } };
     safely(() => sanitizeEmbeds(target));
-    safely(() => decorateHeadings(target));
+    safely(() => decorateHeadings(target, true));
     safely(() => decorateCode(target));
     safely(() => wrapTables(target));
     safely(() => polishLinks(target));
     safely(() => addDropCap(target));
     safely(() => displayNotices(target));
-    /* Anchors would collide with the reader's ids and hijack the URL */
-    target.querySelectorAll(".anchor").forEach((a) => a.remove());
-    target.querySelectorAll("[id]").forEach((el) => el.removeAttribute("id"));
   }
 
   function setTitle(source) {
@@ -391,21 +385,47 @@
   }
 
   /* Heading ids + hover anchors */
-  function decorateHeadings(container = article) {
-    const used = new Set();
-    container.querySelectorAll("h1, h2, h3, h4, h5, h6").forEach((h) => {
-      let id = slugify(h.textContent);
-      let n = 2;
-      while (used.has(id)) id = slugify(h.textContent) + "-" + n++;
-      used.add(id);
-      h.id = id;
+  function decorateHeadings(container = article, preview = false) {
+    const headings = Array.from(container.querySelectorAll("h1, h2, h3, h4, h5, h6"));
+    const used = new Set(Array.from(document.querySelectorAll("[id]"), el => el.id));
+    const targets = new Map();
+    const logicalIds = new Set();
+    const availableId = (base, isUsed) => {
+      let id = base, suffix = 2;
+      while (isUsed(id)) id = base + "-" + suffix++;
+      return id;
+    };
+    const slugs = headings.map(h => {
+      const slug = availableId(slugify(h.textContent), id => logicalIds.has(id));
+      logicalIds.add(slug);
+      return slug;
+    });
+    headings.forEach((h, index) => {
+      const slug = slugs[index];
+      const base = preview ? "preview-" + slug : slug;
+      h.id = availableId(base, id => used.has(id) || (id !== slug && logicalIds.has(id)));
+      used.add(h.id);
+      targets.set(slug, h);
 
+      if (preview) return;
       const anchor = document.createElement("a");
       anchor.className = "anchor";
-      anchor.href = "#" + id;
+      anchor.href = "#" + encodeURIComponent(h.id);
       anchor.textContent = "#";
       anchor.setAttribute("aria-label", "Link to this section");
       h.appendChild(anchor);
+    });
+    container.querySelectorAll('a[href^="#"]:not(.anchor)').forEach(link => {
+      let fragment;
+      try { fragment = decodeURIComponent(link.getAttribute("href").slice(1)).normalize("NFC"); }
+      catch (_) { return; }
+      const target = targets.get(fragment);
+      if (!target) return;
+      link.href = "#" + encodeURIComponent(target.id);
+      if (preview) link.addEventListener("click", event => {
+        event.preventDefault();
+        target.scrollIntoView({ block: "start" });
+      });
     });
   }
 
@@ -536,8 +556,10 @@
     headings.forEach((h) => {
       const link = document.createElement("a");
       link.className = "toc-link lvl-" + h.tagName[1];
-      link.href = "#" + h.id;
-      link.textContent = h.firstChild ? h.firstChild.textContent : h.textContent;
+      link.href = "#" + encodeURIComponent(h.id);
+      link.textContent = Array.from(h.childNodes)
+        .filter(node => !node.classList?.contains("anchor"))
+        .map(node => node.textContent).join("");
       link.addEventListener("click", () => {
         const i = tocHeadings.findIndex((t) => t.link === link);
         setActiveToc(i);
@@ -999,10 +1021,10 @@
           showLanding();
           return;
         }
-        saveSession(currentSource, currentFileName, false);
+        saveSession();
       },
       /* Auto-save: a backgrounded phone tab can be discarded mid-sentence */
-      onChange: (source, fileName) => saveSession(source, fileName, true)
+      onChange: (source, fileName) => saveSession({ source, fileName })
     });
   }
 
@@ -1089,22 +1111,19 @@
     if (mdParam && mdParam.trim()) {
       try {
         renderMarkdown(mdParam, "shared.md", "share-link");
+        if (hash.has("md")) history.replaceState(null, "", location.pathname + location.search);
         return;
       } catch (e) { /* fall through to session restore */ }
     }
     let saved = null;
     try { saved = JSON.parse(sessionStorage.getItem("bmd-doc")); } catch (e) { saved = null; }
-    if (saved && saved.source && String(saved.source).trim()) {
+    if (typeof saved?.source === "string" && saved.source.trim()) {
       renderMarkdown(saved.source, saved.fileName || "restored.md", "session-restore");
-      /* The tab was discarded mid-edit — come back to the editor, not the
-         reader, so nothing typed on a phone is quietly lost. */
-      if (saved.editing && window.bmdEditor) {
-        const name = saved.fileName || "restored.md";
-        window.bmdEditor.open(saved.source, name);
-        /* renderMarkdown above cleared the flag; a second discard should
-           still come back here, even if nothing new was typed. */
-        saveSession(saved.source, name, true);
-      }
+    }
+    // Older sessions only stored one source. Keep that source available on recovery.
+    const draft = saved?.draft || (saved?.editing ? saved : null);
+    if (typeof draft?.source === "string" && window.bmdEditor) {
+      window.bmdEditor.open(currentSource, draft.fileName || "untitled.md", draft.source);
     }
   })();
 

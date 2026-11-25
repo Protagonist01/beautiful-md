@@ -374,7 +374,7 @@ async function autosave(browser) {
   await page.locator("#editorArea").fill("# Half written\n\nA sentence left mid-");
   await page.waitForTimeout(700);
   const stored = await page.evaluate(() => sessionStorage.getItem("bmd-doc"));
-  expect(!!stored && JSON.parse(stored).editing === true,
+  expect(!!stored && typeof JSON.parse(stored).draft?.source === "string",
     "typing writes an editing session", String(stored).slice(0, 90));
 
   await page.reload({ waitUntil: "domcontentloaded" });

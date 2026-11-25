@@ -25,19 +25,19 @@
   let opening = "";
   let previewTimer = 0;
   let chartTimer = 0;
-  let changeTimer = 0;
 
   /* ---------------- open / close ---------------- */
 
-  function openEditor(source, name) {
+  function openEditor(source, name, draft = source) {
     fileName = name || "untitled.md";
     opening = source || "";
-    area.value = opening;
+    area.value = draft || "";
     open = true;
     editor.classList.remove("is-hidden");
     document.body.classList.add("locked");
     showPane("write");
     renderPreview();
+    hooks.onChange?.(area.value, fileName);
     /* A phone keyboard springing up during the opening paint fights the
        layout, so hold focus until the surface has settled. */
     requestAnimationFrame(() => {
@@ -52,7 +52,6 @@
     open = false;
     clearTimeout(previewTimer);
     clearTimeout(chartTimer);
-    clearTimeout(changeTimer);
     editor.classList.add("is-hidden");
     document.body.classList.remove("locked");
     window.bmdImages?.release(preview);
@@ -104,10 +103,7 @@
   area.addEventListener("input", () => {
     clearTimeout(previewTimer);
     previewTimer = setTimeout(renderPreview, 250);
-    clearTimeout(changeTimer);
-    changeTimer = setTimeout(() => {
-      if (open && hooks.onChange) hooks.onChange(area.value, fileName);
-    }, 400);
+    if (open) hooks.onChange?.(area.value, fileName);
   });
 
   /* ---------------- text editing ---------------- */

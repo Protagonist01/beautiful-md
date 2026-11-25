@@ -3,6 +3,62 @@ const assert = require('node:assert/strict');
 const { chromium, firefox, webkit } = require('playwright');
 const { serve, load } = require('./runtime.cjs');
 const source = '# Browser verification\n\nReadable **bold** text with É and 👨‍👩‍👧‍👦.\n\nمرحبا بالعالم\n\n漢字日本語中文\n\n| Left | Right |\n|:---|---:|\n| A | 12 |\n\n```js\nif (ready) {\n  run();\n}\n```';
+async function verifyRecoveryAndPrint(page, browser) {
+  const saved = '# Saved document\n\n[Arabic](#مرحبا) [Japanese](#日本語) [Reader](#reader) [Second Reader](#reader-2)\n\n## مرحبا\n\n## 日本語\n\n## Reader\n\n## Reader';
+  await page.locator('#editBtn').click();
+  await page.locator('#editorArea').fill(saved);
+  await page.locator('#editorDone').click();
+  await page.locator('#editBtn').click();
+  const draft = '# New draft';
+  // Write the value and inspect session storage in the same browser task.
+  const session = await page.locator('#editorArea').evaluate((editor, text) => {
+    editor.value = text;
+    editor.dispatchEvent(new Event('input', { bubbles: true }));
+    return JSON.parse(sessionStorage.getItem('bmd-doc'));
+  }, draft);
+  assert.equal(session.source, saved);
+  assert.equal(session.draft.source, draft);
+  await page.reload({ waitUntil: 'domcontentloaded' });
+  await page.locator('#editorArea').waitFor();
+  assert.equal(await page.locator('#editorArea').inputValue(), draft);
+  page.once('dialog', dialog => dialog.accept());
+  await page.locator('#editorCancel').click();
+  await page.locator('#editorArea').waitFor({ state: 'hidden' });
+  assert.match(await page.locator('#article h1').textContent(), /^Saved document/);
+  const exported = await page.evaluate(async () => {
+    const article = document.querySelector('#article');
+    const links = Array.from(article.querySelectorAll('a[href^="#"]:not(.anchor)'), link => {
+      const id = decodeURIComponent(link.hash.slice(1));
+      const target = document.getElementById(id);
+      return { id, valid: article.contains(target) && target?.tagName === 'H2' };
+    });
+    document.documentElement.dataset.paper = 'graph';
+    document.documentElement.dataset.theme = 'dark';
+    return { links, html: await window.bmdPrint.prepare(article) };
+  });
+  assert.deepEqual(exported.links.slice(0, 2).map(link => link.id), ['مرحبا', '日本語']);
+  assert.ok(exported.links.every(link => link.valid));
+  assert.equal(new Set(exported.links.map(link => link.id)).size, 4);
+  assert.equal(await page.locator('[id="reader"]').count(), 1);
+  const standalone = await browser.newPage();
+  try {
+    await standalone.route('https://fonts.googleapis.com/**', route => route.abort());
+    await standalone.setContent(exported.html);
+    for (const media of ['screen', 'print']) {
+      await standalone.emulateMedia({ media });
+      const appearance = await standalone.evaluate(() => ({
+        paper: document.documentElement.dataset.paper,
+        theme: document.documentElement.dataset.theme,
+        background: getComputedStyle(document.querySelector('.print-article')).backgroundImage
+      }));
+      assert.equal(appearance.paper, 'graph');
+      assert.equal(appearance.theme, 'dark');
+      assert.match(appearance.background, /repeating-linear-gradient/);
+    }
+  } finally {
+    await standalone.close();
+  }
+}
 (async () => {
   const server = await serve(), results = [];
   try {
@@ -69,6 +125,8 @@ const source = '# Browser verification\n\nReadable **bold** text with É and �
           await page.evaluate(() => window.bmdImages.ready(document.querySelector('#article')));
           state.imageRejectedBeforeDecode = await page.locator('#article img[data-bmd-image-error]:not([src])').count() === 1;
           assert.ok(state.imageRejectedBeforeDecode);
+          await verifyRecoveryAndPrint(page, browser);
+          state.draftRecoveryAndPaper = true;
           results.push({ engine: name, width, passed: true, state }); await page.close();
         }
       } catch (error) { results.push({ engine: name, passed: false, error: error.message }); process.exitCode = 1; }

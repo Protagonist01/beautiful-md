@@ -425,3 +425,53 @@ test('Sheets converts supported chart JSON into numeric data and an editable cha
   assert.equal(requests.find(r => r.addChart).addChart.chart.position.overlayPosition.anchorCell.sheetId, 7);
   assert.throws(() => md.sheets(md.parse(source.replace('"bar"', '"radar"')), 7), /Native Sheets charts support/);
 });
+
+function chartFence(labels, datasets) {
+  return '~~~chart\n' + JSON.stringify({ type: 'bar', data: { labels, datasets } }) + '\n~~~';
+}
+
+test('Sheets rejects every mismatched chart series before creating or modifying a spreadsheet', () => {
+  const { ctx, md, calls, user } = runtime();
+  for (const data of [[1], [1, 2, 3]]) {
+    const source = chartFence(['A', 'B'], [{ data: [1, 2] }, { data }]);
+    assert.throws(() => md.sheets(md.parse(source), 7), /Chart series 2 must have exactly 2 values/);
+    assert.match(JSON.stringify(ctx.createNative(event('sheets', source))), /Chart series 2 must have exactly 2 values/);
+    assert.match(JSON.stringify(ctx.insertNative(event('sheets', source, {
+      sheets: { id: 'chosen-sheet', addonHasFileScopePermission: true }
+    }))), /Chart series 2 must have exactly 2 values/);
+  }
+  assert.equal(calls.length, 0);
+  assert.equal(user.bmdOperation, undefined);
+});
+
+test('Sheets anchors consecutive charts outside the widest data and separates them by chart height', () => {
+  const { md } = runtime();
+  const chart = chartFence(['A', 'B'], [{ data: [1, 2] }]);
+  const source = [chart, chart, '| A | B | C | D | E |\n|---|---|---|---|---|\n| 1 | 2 | 3 | 4 | 5 |'].join('\n\n');
+  const requests = md.sheets(md.parse(source), 7);
+  const positions = requests.filter(request => request.addChart).map(request => request.addChart.chart.position.overlayPosition);
+  assert.equal(positions.length, 2);
+  assert.equal(positions[0].anchorCell.columnIndex, 6);
+  assert.deepEqual(positions[1].anchorCell, positions[0].anchorCell);
+  assert.ok(positions[1].offsetYPixels >= positions[0].offsetYPixels + positions[0].heightPixels + 24);
+  assert.deepEqual(Array.from(requests.filter(request => request.addChart), request => {
+    return request.addChart.chart.spec.basicChart.domains[0].domain.sourceRange.sources[0].startRowIndex;
+  }), [0, 3]);
+});
+
+test('nested lists, starting numbers, task state, and quotes survive across all hosts', () => {
+  const { md } = runtime();
+  const blocks = md.parse('3. Parent\n   - **Child**\n     - [x] Task\n4. Sibling\n\n> First line.\n>\n> > Nested quote.');
+  const html = md.html(blocks);
+  assert.match(html, /<ol start="3"><li><p>Parent<\/p><ul><li><p><strong>Child<\/strong><\/p><ul><li>☑ /);
+  assert.match(html, /<blockquote><p>First line\.<\/p><blockquote><p>Nested quote\.<\/p><\/blockquote><\/blockquote>/);
+  const doc = md.docs(blocks, 1);
+  assert.match(doc[0].insertText.text, /3\. Parent\n• Child\n☑ Task\n4\. Sibling\n> First line\.\n> > Nested quote\./);
+  assert.ok(doc.some(request => request.updateParagraphStyle?.paragraphStyle.indentStart.magnitude === 28));
+  const sheet = md.sheets(blocks, 7)[0].updateCells.rows;
+  assert.equal(sheet[1].values[0].userEnteredValue.stringValue, '  • Child');
+  assert.equal(sheet[2].values[0].userEnteredValue.stringValue, '    ☑ Task');
+  const slide = md.slides(blocks, 720, 405, 'nesting');
+  assert.ok(slide.some(request => request.insertText?.text.includes('• Child\n☑ Task')));
+  assert.ok(slide.some(request => request.updateParagraphStyle?.style.indentStart?.magnitude === 28));
+});

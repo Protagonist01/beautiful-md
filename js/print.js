@@ -25,15 +25,21 @@ window.bmdPrint = {
     const css = await wait(fetch(new URL('css/style.css', location.href), { signal: options.signal }).then(r => {
       if (!r.ok) throw new Error('Could not load print styles.'); return r.text();
     }));
-    const variables = getComputedStyle(document.documentElement);
+    const root = document.documentElement;
+    const variables = getComputedStyle(root);
     let custom = '';
     for (const name of variables) if (name.startsWith('--')) custom += name + ':' + variables.getPropertyValue(name) + ';';
     const fonts = Array.from(document.querySelectorAll('link[rel="stylesheet"]')).filter(link => new URL(link.href).hostname === 'fonts.googleapis.com').map(link => link.outerHTML).join('');
     const escape = text => text.replace(/[&<>"']/g, char => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;' }[char]));
-    return '<!doctype html><html lang="' + escape(document.documentElement.lang || 'en') + '"><head><meta charset="utf-8"><title>' + escape(document.title) + '</title>' + fonts +
+    const rootAttributes = ' lang="' + escape(root.lang || 'en') + '"' +
+      ' data-paper="' + escape(root.dataset.paper || 'paper') + '"' +
+      ' data-theme="' + escape(root.dataset.theme || 'light') + '"';
+    return '<!doctype html><html' + rootAttributes + '><head><meta charset="utf-8"><title>' + escape(document.title) + '</title>' + fonts +
       '<style>' + css + '\n:root{' + custom + '}\n' +
-      '@page{size:A4;margin:12mm}body{display:block;min-height:0;padding:0;background:var(--paper-raised);color:var(--ink)}' +
-      '.print-article{display:block;width:100%;max-width:none;margin:0;padding:0;animation:none;opacity:1;transform:none;box-shadow:none;border:0}' +
+      '@page{size:A4;margin:12mm}body{display:block;min-height:0;padding:0;background-color:var(--paper-raised);color:var(--ink)}' +
+      '@media print{.print-article a{color:var(--accent)}}' +
+      '.article.print-article{display:block;width:100%;max-width:none;margin:0;padding:0;animation:none;opacity:1;transform:none;box-shadow:none;border:0}' +
+      ':is([data-paper="ruled"],[data-paper="legal"]) .article.print-article{padding:0 1.2em 1.2em 3em}' +
       '.print-article pre{white-space:pre-wrap;overflow-wrap:anywhere;overflow:visible}.table-wrap{overflow:visible}table{table-layout:fixed;width:100%}th,td{overflow-wrap:anywhere}' +
       'thead{display:table-header-group}tr,figure{break-inside:avoid}h1,h2,h3,h4,h5,h6{break-after:avoid}p{orphans:3;widows:3}' +
       '.print-article img{max-width:100%;max-height:240mm;object-fit:contain}*{-webkit-print-color-adjust:exact;print-color-adjust:exact}' +
